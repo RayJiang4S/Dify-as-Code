@@ -14,6 +14,9 @@
   <a href="https://github.com/RayJiang4S/Dify-as-Code">
     <img src="https://img.shields.io/badge/VS%20Code%20Marketplace-Coming%20Soon-orange?logo=visual-studio-code&logoColor=white" alt="VS Code Marketplace Coming Soon">
   </a>
+  <a href="https://github.com/RayJiang4S/Dify-as-Code/releases/latest">
+    <img src="https://img.shields.io/github/v/release/RayJiang4S/Dify-as-Code?label=Release&logo=github" alt="Latest Release">
+  </a>
 </p>
 
 ---
