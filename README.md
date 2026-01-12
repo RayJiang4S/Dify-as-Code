@@ -181,7 +181,7 @@ MIT License — Use freely, contribute back!
 
 ## 🤝 Contributing
 
-Issues and Pull Requests are welcome on [GitHub](https://github.com/your-repo/dify-as-code).
+Issues and Pull Requests are welcome on [GitHub](https://github.com/RayJiang4S/Dify-as-Code).
 
 ---
 
