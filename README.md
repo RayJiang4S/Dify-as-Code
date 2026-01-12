@@ -35,6 +35,12 @@ Building AI apps with [Dify](https://dify.ai) is amazing, but managing them in a
 
 ---
 
+## 🗺️ Roadmap
+
+> 🚧 This project is actively developing. Check my [Milestones](https://github.com/RayJiang4S/Dify-as-Code/milestones) for upcoming features!
+
+---
+
 ## ✨ Key Features
 
 ### 🔄 Bi-directional Sync
