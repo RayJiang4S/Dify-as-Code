@@ -1,0 +1,12 @@
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Code brackets -->
+  <path d="M7 6L3 12L7 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M17 6L21 12L17 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Circular sync arrows in center -->
+  <path d="M14 9C14 9 13.2 8 12 8C10.3 8 9 9.3 9 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M10 15C10 15 10.8 16 12 16C13.7 16 15 14.7 15 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Arrow heads -->
+  <path d="M9 9L9 11L11 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M15 15L15 13L13 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
