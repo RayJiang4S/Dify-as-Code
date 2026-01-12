@@ -5,14 +5,14 @@
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=prom-ai.dify-as-code">
-    <img src="https://img.shields.io/visual-studio-marketplace/v/prom-ai.dify-as-code?label=VS%20Code%20Marketplace&logo=visual-studio-code&logoColor=white" alt="VS Code Marketplace">
+  <a href="https://github.com/RayJiang4S/Dify-as-Code">
+    <img src="https://img.shields.io/github/stars/RayJiang4S/Dify-as-Code?style=social" alt="GitHub Stars">
   </a>
-  <a href="https://github.com/prom-ai/dify-as-code">
-    <img src="https://img.shields.io/github/stars/prom-ai/dify-as-code?style=social" alt="GitHub Stars">
+  <a href="https://github.com/RayJiang4S/Dify-as-Code/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/RayJiang4S/Dify-as-Code" alt="License">
   </a>
-  <a href="https://github.com/prom-ai/dify-as-code/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/prom-ai/dify-as-code" alt="License">
+  <a href="https://github.com/RayJiang4S/Dify-as-Code">
+    <img src="https://img.shields.io/badge/VS%20Code-Extension-blue?logo=visual-studio-code&logoColor=white" alt="VS Code Extension">
   </a>
 </p>
 
