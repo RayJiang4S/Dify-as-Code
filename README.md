@@ -12,7 +12,7 @@
     <img src="https://img.shields.io/github/license/RayJiang4S/Dify-as-Code" alt="License">
   </a>
   <a href="https://github.com/RayJiang4S/Dify-as-Code">
-    <img src="https://img.shields.io/badge/VS%20Code-Extension-blue?logo=visual-studio-code&logoColor=white" alt="VS Code Extension">
+    <img src="https://img.shields.io/badge/VS%20Code%20Marketplace-Coming%20Soon-orange?logo=visual-studio-code&logoColor=white" alt="VS Code Marketplace Coming Soon">
   </a>
 </p>
 
