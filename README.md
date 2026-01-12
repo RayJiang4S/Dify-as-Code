@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/RayJiang4S/Dify-as-Code">
-    <img src="https://img.shields.io/github/stars/RayJiang4S/Dify-as-Code?style=social" alt="GitHub Stars">
+    <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen?logo=github" alt="PRs Welcome">
   </a>
   <a href="https://github.com/RayJiang4S/Dify-as-Code/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/RayJiang4S/Dify-as-Code" alt="License">
