@@ -3,7 +3,7 @@
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import { DifyApp, DifyAppListResponse, APP_MODE_TO_TYPE, AppType } from './types';
+import { DifyApp, DifyAppListResponse, DifyWorkspace, APP_MODE_TO_TYPE, AppType, UserRole } from './types';
 
 /**
  * Encode sensitive field using Base64
@@ -55,6 +55,15 @@ export interface AppDetails {
     name: string;
     type: AppType;
     updatedAt: string;
+    role?: UserRole;
+    readonly?: boolean;
+}
+
+export interface WorkspaceDetails {
+    id: string;
+    name: string;
+    role: UserRole;
+    current: boolean;
 }
 
 export class DifyApiClient {
@@ -255,6 +264,77 @@ export class DifyApiClient {
             console.log('[DifyAPI] Token refreshed from cookies');
         } else {
             console.log('[DifyAPI] No new token found in refresh response');
+        }
+    }
+
+    /**
+     * Get workspaces list (tenants the current user belongs to)
+     */
+    async getWorkspaces(): Promise<WorkspaceDetails[]> {
+        try {
+            console.log('[DifyAPI] Getting workspaces...');
+            const response = await this.client.get('/console/api/workspaces');
+            
+            const workspaces = response.data.workspaces || response.data || [];
+            console.log(`[DifyAPI] Found ${workspaces.length} workspaces`);
+            
+            return workspaces.map((ws: DifyWorkspace) => ({
+                id: ws.id,
+                name: ws.name,
+                role: (ws.role || 'normal') as UserRole,
+                current: ws.current || false,
+            }));
+        } catch (error) {
+            console.error('[DifyAPI] Failed to get workspaces:', error);
+            // If workspaces API fails, try to get current workspace from account info
+            try {
+                console.log('[DifyAPI] Trying to get workspace from account info...');
+                const accountResponse = await this.client.get('/console/api/account/profile');
+                const profile = accountResponse.data;
+                
+                // Return single workspace based on current tenant
+                if (profile.current_tenant_id) {
+                    return [{
+                        id: profile.current_tenant_id,
+                        name: profile.current_tenant_name || 'Default Workspace',
+                        role: (profile.current_tenant_role || 'normal') as UserRole,
+                        current: true,
+                    }];
+                }
+            } catch (profileError) {
+                console.error('[DifyAPI] Failed to get account profile:', profileError);
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Switch to a specific workspace
+     */
+    async switchWorkspace(tenantId: string): Promise<boolean> {
+        try {
+            console.log(`[DifyAPI] Switching to workspace: ${tenantId}`);
+            await this.client.post('/console/api/workspaces/switch', {
+                tenant_id: tenantId,
+            });
+            console.log('[DifyAPI] Workspace switched successfully');
+            return true;
+        } catch (error) {
+            console.error('[DifyAPI] Failed to switch workspace:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Get current workspace info
+     */
+    async getCurrentWorkspace(): Promise<WorkspaceDetails | null> {
+        try {
+            const workspaces = await this.getWorkspaces();
+            return workspaces.find(ws => ws.current) || workspaces[0] || null;
+        } catch (error) {
+            console.error('[DifyAPI] Failed to get current workspace:', error);
+            return null;
         }
     }
 

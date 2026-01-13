@@ -3,13 +3,21 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import {
     TreeNodeData,
     PlatformNodeData,
     AccountNodeData,
+    WorkspaceNodeData,
+    ResourceFolderNodeData,
+    ResourceFolderType,
     AppNodeData,
     APP_TYPE_ICONS,
     ROLE_ICONS,
+    WORKSPACE_ROLE_ICONS,
+    RESOURCE_FOLDER_NAMES,
+    RESOURCE_FOLDER_ICONS,
 } from './types';
 import { ConfigManager } from './configManager';
 
@@ -74,9 +82,42 @@ export class DifyTreeDataProvider implements vscode.TreeDataProvider<DifyTreeIte
             }
 
             if (data.type === 'account') {
-                // Account node: get apps
-                const apps = await this.configManager.getAppsForAccount(data.path, data.platformUrl, data.email);
-                return apps.map(a => new DifyTreeItem(a, vscode.TreeItemCollapsibleState.None));
+                // Account node: get workspaces
+                const workspaces = await this.configManager.getWorkspacesForAccount(data.path, data.platformUrl, data.email);
+                return workspaces.map(w => new DifyTreeItem(w, vscode.TreeItemCollapsibleState.Expanded));
+            }
+
+            if (data.type === 'workspace') {
+                // Workspace node: get resource folders (studio, knowledge, tools, plugins)
+                const folderTypes: ResourceFolderType[] = ['studio', 'knowledge', 'tools', 'plugins'];
+                const folders: ResourceFolderNodeData[] = [];
+                
+                for (const folderType of folderTypes) {
+                    const folderPath = path.join(data.path, folderType);
+                    if (fs.existsSync(folderPath)) {
+                        folders.push({
+                            type: 'resource-folder',
+                            folderType,
+                            name: RESOURCE_FOLDER_NAMES[folderType],
+                            platformUrl: data.platformUrl,
+                            accountEmail: data.accountEmail,
+                            path: folderPath,
+                        });
+                    }
+                }
+                
+                return folders.map(f => new DifyTreeItem(f, vscode.TreeItemCollapsibleState.Expanded));
+            }
+
+            if (data.type === 'resource-folder') {
+                // Resource folder node: only studio has apps for now
+                if (data.folderType === 'studio') {
+                    const workspacePath = path.dirname(data.path);
+                    const apps = await this.configManager.getAppsForWorkspace(workspacePath, data.platformUrl, data.accountEmail);
+                    return apps.map(a => new DifyTreeItem(a, vscode.TreeItemCollapsibleState.None));
+                }
+                // Other folders are empty for now
+                return [];
             }
 
             return [];
@@ -126,6 +167,12 @@ export class DifyTreeItem extends vscode.TreeItem {
                 return data.name;
             case 'account':
                 return data.email;
+            case 'workspace': {
+                const roleIcon = WORKSPACE_ROLE_ICONS[data.role] || '';
+                return `${data.name}${roleIcon ? ` ${roleIcon}` : ''}`;
+            }
+            case 'resource-folder':
+                return data.name;
             case 'app': {
                 const icon = APP_TYPE_ICONS[data.appType] || '📦';
                 const roleIcon = data.role ? ROLE_ICONS[data.role] || '' : '';
@@ -141,6 +188,10 @@ export class DifyTreeItem extends vscode.TreeItem {
                 return 'platform';
             case 'account':
                 return 'account';
+            case 'workspace':
+                return 'workspace';
+            case 'resource-folder':
+                return `resource-folder-${data.folderType}`;
             case 'app':
                 return data.readonly ? 'app-readonly' : 'app-editable';
         }
@@ -152,6 +203,10 @@ export class DifyTreeItem extends vscode.TreeItem {
                 return new vscode.ThemeIcon('cloud');
             case 'account':
                 return new vscode.ThemeIcon('account');
+            case 'workspace':
+                return new vscode.ThemeIcon('folder-library');
+            case 'resource-folder':
+                return new vscode.ThemeIcon(RESOURCE_FOLDER_ICONS[data.folderType]);
             case 'app':
                 return undefined; // Use emoji icons
         }
@@ -163,6 +218,10 @@ export class DifyTreeItem extends vscode.TreeItem {
                 return `${data.name}\n${data.url}`;
             case 'account':
                 return `${data.email}\nPlatform: ${data.platformName}`;
+            case 'workspace':
+                return `${data.name}\nRole: ${data.role}\nAccount: ${data.accountEmail}`;
+            case 'resource-folder':
+                return `${data.name}\nPath: ${data.path}`;
             case 'app': {
                 const role = data.role ? `\nRole: ${data.role}` : '';
                 const status = data.syncStatus ? `\nStatus: ${data.syncStatus}` : '';

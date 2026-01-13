@@ -7,7 +7,7 @@ import * as path from 'path';
 import { DifyTreeDataProvider, DifyTreeItem } from './treeDataProvider';
 import { ConfigManager } from './configManager';
 import { getApiClient, removeApiClient } from './difyApi';
-import { AppInfo, PlatformNodeData, AccountNodeData, AppNodeData } from './types';
+import { PlatformNodeData, AccountNodeData, WorkspaceNodeData, AppNodeData, APP_MODE_TO_TYPE } from './types';
 
 /**
  * Format date to YYYY-MM-DDTHH:mm:ss (compact, no line break)
@@ -48,8 +48,29 @@ function formatDateTime(dateInput: string | number | undefined | null): string {
     const hours = String(date.getHours()).padStart(2, '0');
     const minutes = String(date.getMinutes()).padStart(2, '0');
     const seconds = String(date.getSeconds()).padStart(2, '0');
-    // Use T separator to prevent line break
-    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+/**
+ * Show a notification with countdown timer (auto-dismiss after timeout)
+ */
+function showTimedNotification(message: string, timeoutSeconds: number = 10): void {
+    vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: message,
+            cancellable: false,
+        },
+        async (progress) => {
+            const steps = 100;
+            const intervalMs = (timeoutSeconds * 1000) / steps;
+            
+            for (let i = 0; i <= steps; i++) {
+                await new Promise(resolve => setTimeout(resolve, intervalMs));
+                progress.report({ increment: 1 });
+            }
+        }
+    );
 }
 
 export class CommandHandler {
@@ -73,6 +94,8 @@ export class CommandHandler {
             vscode.commands.registerCommand('dify.editAccount', (item: DifyTreeItem) => this.editAccount(item)),
             vscode.commands.registerCommand('dify.deleteAccount', (item: DifyTreeItem) => this.deleteAccount(item)),
             vscode.commands.registerCommand('dify.pullAccount', (item: DifyTreeItem) => this.pullAccount(item)),
+            
+            vscode.commands.registerCommand('dify.pullWorkspace', (item: DifyTreeItem) => this.pullWorkspace(item)),
             
             vscode.commands.registerCommand('dify.openAppConfig', (item: DifyTreeItem) => this.openAppConfig(item)),
             vscode.commands.registerCommand('dify.openInDify', (item: DifyTreeItem) => this.openInDify(item)),
@@ -164,7 +187,7 @@ export class CommandHandler {
 
         try {
             await configManager.createPlatform(name, url);
-            vscode.window.showInformationMessage(`Platform added: ${name} (${url})`);
+            showTimedNotification(`✓ Platform added: ${name}`);
             this.treeDataProvider.refresh();
 
             // Prompt to add account
@@ -221,7 +244,7 @@ export class CommandHandler {
 
         try {
             await configManager.updatePlatform(data.path, name, url);
-            vscode.window.showInformationMessage('Platform info updated');
+            showTimedNotification('✓ Platform info updated');
             this.treeDataProvider.refresh();
         } catch (error) {
             vscode.window.showErrorMessage(`Update failed: ${error}`);
@@ -250,7 +273,7 @@ export class CommandHandler {
         try {
             removeApiClient(data.url);
             await configManager.deletePlatform(data.path);
-            vscode.window.showInformationMessage(`Platform deleted: ${data.name}`);
+            showTimedNotification(`✓ Platform deleted: ${data.name}`);
             this.treeDataProvider.refresh();
         } catch (error) {
             vscode.window.showErrorMessage(`Delete failed: ${error}`);
@@ -290,7 +313,7 @@ export class CommandHandler {
         });
 
         this.treeDataProvider.refresh();
-        vscode.window.showInformationMessage(`Pulled all apps from platform ${data.name}`);
+        showTimedNotification(`✓ Pulled all apps from platform ${data.name}`);
     }
 
     // ==================== Account Commands ====================
@@ -369,32 +392,42 @@ export class CommandHandler {
                 // Create account
                 const account = await configManager.createAccount(platform.path, platform.url, email, password);
 
-                console.log('[AddAccount] Fetching apps...');
-                // Pull app list
-                const apps = await client.getAllApps();
-                console.log(`[AddAccount] Found ${apps.length} apps`);
-                
-                const appInfos: AppInfo[] = apps.map(app => ({
-                    id: app.id,
-                    name: app.name,
-                    type: app.type,
-                }));
-                await configManager.updateAccountApps(account.path, appInfos);
+                // Fetch workspaces
+                console.log('[AddAccount] Fetching workspaces...');
+                const workspaces = await client.getWorkspaces();
+                console.log(`[AddAccount] Found ${workspaces.length} workspaces`);
 
-                // Pull all app DSLs
-                for (const app of apps) {
-                    try {
-                        console.log(`[AddAccount] Exporting app: ${app.name}`);
-                        const { dsl, updatedAt } = await client.exportApp(app.id);
-                        await configManager.saveAppDsl(account.path, app.id, app.name, dsl, updatedAt);
-                    } catch (error) {
-                        console.error(`Failed to export app ${app.name}:`, error);
+                // For each workspace, create directory and fetch apps
+                for (const ws of workspaces) {
+                    console.log(`[AddAccount] Processing workspace: ${ws.name}`);
+                    const workspace = await configManager.saveWorkspace(
+                        account.path, ws.id, ws.name, ws.role,
+                        platform.url, email
+                    );
+
+                    // Fetch apps for this workspace
+                    console.log(`[AddAccount] Fetching apps for workspace: ${ws.name}...`);
+                    const apps = await client.getAllApps();
+                    console.log(`[AddAccount] Found ${apps.length} apps`);
+                    
+                    // Pull all app DSLs
+                    for (const app of apps) {
+                        try {
+                            console.log(`[AddAccount] Exporting app: ${app.name}`);
+                            const { dsl, updatedAt } = await client.exportApp(app.id);
+                            await configManager.saveAppDsl(
+                                workspace.path, app.id, app.name, dsl, updatedAt,
+                                app.type, app.role, app.readonly
+                            );
+                        } catch (error) {
+                            console.error(`Failed to export app ${app.name}:`, error);
+                        }
                     }
                 }
             });
 
             this.treeDataProvider.refresh();
-            vscode.window.showInformationMessage(`Account added: ${email}, all apps pulled`);
+            showTimedNotification(`✓ Account added: ${email}, all workspaces and apps pulled`);
         } catch (error) {
             console.error('[AddAccount] Error:', error);
             vscode.window.showErrorMessage(`Failed to add account: ${error}`);
@@ -440,7 +473,7 @@ export class CommandHandler {
 
         try {
             await configManager.updateAccount(data.path, email, password);
-            vscode.window.showInformationMessage('Account info updated');
+            showTimedNotification('✓ Account info updated');
             this.treeDataProvider.refresh();
         } catch (error) {
             vscode.window.showErrorMessage(`Update failed: ${error}`);
@@ -468,7 +501,7 @@ export class CommandHandler {
 
         try {
             await configManager.deleteAccount(data.path);
-            vscode.window.showInformationMessage(`Account deleted: ${data.email}`);
+            showTimedNotification(`✓ Account deleted: ${data.email}`);
             this.treeDataProvider.refresh();
         } catch (error) {
             vscode.window.showErrorMessage(`Delete failed: ${error}`);
@@ -492,11 +525,12 @@ export class CommandHandler {
         });
 
         this.treeDataProvider.refresh();
-        vscode.window.showInformationMessage(`Pulled all apps for account ${data.email}`);
+        showTimedNotification(`✓ Pulled all apps for account ${data.email}`);
     }
 
     /**
      * Pull account data (internal method)
+     * Now handles workspace-level organization
      */
     private async pullAccountData(account: AccountNodeData): Promise<void> {
         const configManager = this.getConfigManager();
@@ -514,73 +548,147 @@ export class CommandHandler {
             throw new Error('Login failed');
         }
 
-        // Get current local apps before pulling
-        const localApps = await configManager.getAppsForAccount(
-            account.path, 
-            account.platformUrl, 
-            account.email
+        // Fetch workspaces from remote
+        console.log('[PullAccount] Fetching workspaces...');
+        const remoteWorkspaces = await client.getWorkspaces();
+        const remoteWorkspaceIds = new Set(remoteWorkspaces.map(ws => ws.id));
+        console.log(`[PullAccount] Remote workspaces (${remoteWorkspaces.length}):`, remoteWorkspaces.map(ws => ({ id: ws.id, name: ws.name })));
+
+        // Get local workspaces
+        const localWorkspaces = await configManager.getWorkspacesForAccount(account.path, account.platformUrl, account.email);
+        console.log(`[PullAccount] Local workspaces (${localWorkspaces.length}):`, localWorkspaces.map(ws => ({ id: ws.id, name: ws.name })));
+
+        // Process each remote workspace
+        for (const ws of remoteWorkspaces) {
+            console.log(`[PullAccount] Processing workspace: ${ws.name}`);
+            
+            // Create or update workspace
+            const workspace = await configManager.saveWorkspace(
+                account.path, ws.id, ws.name, ws.role,
+                account.platformUrl, account.email
+            );
+
+            // Pull workspace data
+            await this.pullWorkspaceData(workspace, client, configManager);
+        }
+
+        // Delete local workspaces that no longer exist on remote
+        for (const localWs of localWorkspaces) {
+            if (!remoteWorkspaceIds.has(localWs.id)) {
+                console.log(`[PullAccount] Deleting local workspace that no longer exists on remote: ${localWs.name}`);
+                try {
+                    await configManager.deleteWorkspace(localWs.path);
+                } catch (error) {
+                    console.error(`Failed to delete workspace ${localWs.name}:`, error);
+                }
+            }
+        }
+
+        console.log(`[PullAccount] Complete`);
+    }
+
+    /**
+     * Pull workspace data (internal method)
+     */
+    private async pullWorkspaceData(
+        workspace: WorkspaceNodeData, 
+        client: ReturnType<typeof getApiClient>,
+        configManager: ConfigManager
+    ): Promise<void> {
+        // Get current local apps
+        const localApps = await configManager.getAppsForWorkspace(
+            workspace.path, 
+            workspace.platformUrl, 
+            workspace.accountEmail
         );
-        console.log(`[PullAccount] Local apps (${localApps.length}):`, localApps.map(a => ({ id: a.id, name: a.name })));
+        console.log(`[PullWorkspace] Local apps (${localApps.length}):`, localApps.map(a => ({ id: a.id, name: a.name })));
 
         // Pull app list from remote
         const apps = await client.getAllApps();
         const remoteAppIds = new Set(apps.map(app => app.id));
-        console.log(`[PullAccount] Remote apps (${apps.length}):`, apps.map(a => ({ id: a.id, name: a.name })));
-        
-        const appInfos: AppInfo[] = apps.map(app => ({
-            id: app.id,
-            name: app.name,
-            type: app.type,
-        }));
-        await configManager.updateAccountApps(account.path, appInfos);
+        console.log(`[PullWorkspace] Remote apps (${apps.length}):`, apps.map(a => ({ id: a.id, name: a.name })));
 
         // Pull all app DSLs
         for (const app of apps) {
             try {
                 const { dsl, updatedAt } = await client.exportApp(app.id);
-                await configManager.saveAppDsl(account.path, app.id, app.name, dsl, updatedAt);
+                await configManager.saveAppDsl(
+                    workspace.path, app.id, app.name, dsl, updatedAt,
+                    app.type, app.role, app.readonly
+                );
             } catch (error) {
                 console.error(`Failed to export app ${app.name}:`, error);
             }
         }
 
         // Delete local apps that no longer exist on remote
-        console.log(`[PullAccount] Checking for apps to delete...`);
+        console.log(`[PullWorkspace] Checking for apps to delete...`);
         for (const localApp of localApps) {
-            // Try to get app_id from .sync.yml if not in account config
             let appId = localApp.id;
             if (!appId) {
                 const syncMeta = await configManager.getAppSyncMetadata(localApp.path);
                 appId = syncMeta?.app_id || '';
-                console.log(`[PullAccount] App ${localApp.name} has no id in account config, got from sync.yml: "${appId}"`);
             }
             
             const existsOnRemote = appId ? remoteAppIds.has(appId) : false;
-            console.log(`[PullAccount] Checking app: ${localApp.name}, id: "${appId}", exists on remote: ${existsOnRemote}`);
             
             if (appId && !existsOnRemote) {
-                console.log(`[PullAccount] Deleting local app that no longer exists on remote: ${localApp.name} (${localApp.path})`);
+                console.log(`[PullWorkspace] Deleting local app: ${localApp.name}`);
                 try {
                     await configManager.deleteApp(localApp.path);
-                    console.log(`[PullAccount] Successfully deleted: ${localApp.name}`);
                 } catch (error) {
                     console.error(`Failed to delete app ${localApp.name}:`, error);
                 }
             } else if (!appId) {
-                // App has no ID anywhere - check if name matches any remote app
                 const nameExistsOnRemote = apps.some(a => a.name === localApp.name);
                 if (!nameExistsOnRemote) {
-                    console.log(`[PullAccount] Deleting orphan app with no ID and no matching name on remote: ${localApp.name}`);
+                    console.log(`[PullWorkspace] Deleting orphan app: ${localApp.name}`);
                     try {
                         await configManager.deleteApp(localApp.path);
-                        console.log(`[PullAccount] Successfully deleted orphan: ${localApp.name}`);
                     } catch (error) {
                         console.error(`Failed to delete orphan app ${localApp.name}:`, error);
                     }
                 }
             }
         }
-        console.log(`[PullAccount] Cleanup complete`);
+    }
+
+    // ==================== Workspace Commands ====================
+
+    /**
+     * Pull workspace updates
+     */
+    async pullWorkspace(item: DifyTreeItem): Promise<void> {
+        if (item.nodeData.type !== 'workspace') { return; }
+        
+        const configManager = this.getConfigManager();
+        if (!configManager) { return; }
+
+        const data = item.nodeData as WorkspaceNodeData;
+
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: `Pulling apps for workspace ${data.name}...`,
+            cancellable: false,
+        }, async () => {
+            // Get account path (parent of workspace)
+            const accountPath = path.dirname(data.path);
+            const password = await configManager.getAccountPassword(accountPath);
+            if (!password) {
+                throw new Error('Account password not found');
+            }
+
+            const client = getApiClient(data.platformUrl);
+            const success = await client.login(data.accountEmail, password);
+            if (!success) {
+                throw new Error('Login failed');
+            }
+
+            await this.pullWorkspaceData(data, client, configManager);
+        });
+
+        this.treeDataProvider.refresh();
+        showTimedNotification(`✓ Pulled all apps for workspace ${data.name}`);
     }
 
     // ==================== App Commands ====================
@@ -634,8 +742,11 @@ export class CommandHandler {
             title: `Pulling ${data.name}...`,
             cancellable: false,
         }, async () => {
-            // Get account path
-            const accountPath = path.dirname(data.path);
+            // Path: app -> studio -> workspace -> account
+            const studioPath = path.dirname(data.path);
+            const workspacePath = path.dirname(studioPath);
+            const accountPath = path.dirname(workspacePath);
+            
             const password = await configManager.getAccountPassword(accountPath);
             if (!password) {
                 throw new Error('Account password not found');
@@ -648,11 +759,14 @@ export class CommandHandler {
             }
 
             const { dsl, updatedAt } = await client.exportApp(data.id);
-            await configManager.saveAppDsl(accountPath, data.id, data.name, dsl, updatedAt);
+            await configManager.saveAppDsl(
+                workspacePath, data.id, data.name, dsl, updatedAt,
+                data.appType, data.role, data.readonly
+            );
         });
 
         this.treeDataProvider.refresh();
-        vscode.window.showInformationMessage(`App pulled: ${data.name}`);
+        showTimedNotification(`✓ App pulled: ${data.name}`);
     }
 
     /**
@@ -683,8 +797,12 @@ export class CommandHandler {
 
         // Check for unsynced remote updates
         const syncMeta = await configManager.getAppSyncMetadata(data.path);
+        // Path: app -> studio -> workspace -> account
+        const studioPath = path.dirname(data.path);
+        const workspacePath = path.dirname(studioPath);
+        const accountPath = path.dirname(workspacePath);
+        
         if (syncMeta) {
-            const accountPath = path.dirname(data.path);
             const password = await configManager.getAccountPassword(accountPath);
             if (password) {
                 const client = getApiClient(data.platformUrl);
@@ -719,7 +837,6 @@ export class CommandHandler {
                 throw new Error('Failed to read app config');
             }
 
-            const accountPath = path.dirname(data.path);
             const password = await configManager.getAccountPassword(accountPath);
             if (!password) {
                 throw new Error('Account password not found');
@@ -753,11 +870,12 @@ export class CommandHandler {
                 Buffer.from(remoteDsl, 'utf-8')
             );
             
-            // Update sync metadata with new hash
+            // Update sync metadata with new hash (preserve app_type from existing data)
             const crypto = await import('crypto');
             const localHash = crypto.createHash('md5').update(remoteDsl).digest('hex');
             await configManager.updateSyncMetadata(currentPath, {
                 app_id: data.id,
+                app_type: data.appType,
                 last_synced_at: new Date().toISOString(),
                 remote_updated_at: updatedAt,
                 local_hash: localHash,
@@ -765,7 +883,7 @@ export class CommandHandler {
         });
 
         this.treeDataProvider.refresh();
-        vscode.window.showInformationMessage(`App pushed: ${data.name} (to draft)`);
+        showTimedNotification(`✓ App pushed: ${data.name} (to draft)`);
     }
 
     /**
@@ -796,7 +914,11 @@ export class CommandHandler {
                 throw new Error('Failed to read app config');
             }
 
-            const accountPath = path.dirname(data.path);
+            // Path: app -> studio -> workspace -> account
+            const studioPath = path.dirname(data.path);
+            const workspacePath = path.dirname(studioPath);
+            const accountPath = path.dirname(workspacePath);
+            
             const password = await configManager.getAccountPassword(accountPath);
             if (!password) {
                 throw new Error('Account password not found');
@@ -811,22 +933,16 @@ export class CommandHandler {
             // Use API's name parameter to override DSL app name
             const newAppId = await client.createAppFromDsl(dsl, newName);
 
-            // Pull new app
+            // Pull new app (inherits type from original app)
             const { dsl: newDsl, updatedAt } = await client.exportApp(newAppId);
-            await configManager.saveAppDsl(accountPath, newAppId, newName, newDsl, updatedAt);
-
-            // Update account's app list
-            const apps = await client.getAllApps();
-            const appInfos: AppInfo[] = apps.map(app => ({
-                id: app.id,
-                name: app.name,
-                type: app.type,
-            }));
-            await configManager.updateAccountApps(accountPath, appInfos);
+            await configManager.saveAppDsl(
+                workspacePath, newAppId, newName, newDsl, updatedAt,
+                data.appType, data.role, data.readonly
+            );
         });
 
         this.treeDataProvider.refresh();
-        vscode.window.showInformationMessage(`New app created: ${newName}`);
+        showTimedNotification(`✓ New app created: ${newName}`);
     }
 
     /**
@@ -842,26 +958,37 @@ export class CommandHandler {
         const syncMeta = await configManager.getAppSyncMetadata(data.path);
         const syncStatus = await configManager.getAppSyncStatus(data.path);
 
-        let message = `App: ${data.name}\n`;
-        message += `Type: ${data.appType}\n`;
-        message += `Status: `;
-
+        // Get status info
+        let statusText = '✅ Synced';
         switch (syncStatus) {
             case 'synced':
-                message += '✅ Synced';
+                statusText = '✅ Synced';
                 break;
             case 'local-modified':
-                message += '⬆️ Local modified';
+                statusText = '⬆️ Local Modified';
                 break;
             case 'remote-modified':
-                message += '⬇️ Remote updated';
+                statusText = '⬇️ Remote Updated';
                 break;
         }
 
-        if (syncMeta) {
-            message += `\nLast synced: ${formatDateTime(syncMeta.last_synced_at)}`;
-            message += `\nRemote updated: ${formatDateTime(syncMeta.remote_updated_at)}`;
-        }
+        // Use non-breaking space to keep date-time together
+        const nbsp = '\u00A0';
+        const lastSynced = syncMeta?.last_synced_at 
+            ? formatDateTime(syncMeta.last_synced_at).replace(/ /g, nbsp) 
+            : 'Never';
+        const remoteUpdated = syncMeta?.remote_updated_at 
+            ? formatDateTime(syncMeta.remote_updated_at).replace(/ /g, nbsp) 
+            : 'Unknown';
+
+        const message = [
+            data.name,
+            '',
+            `Type: ${data.appType}`,
+            `Status: ${statusText}`,
+            `Last Synced: ${lastSynced}`,
+            `Remote Updated: ${remoteUpdated}`,
+        ].join('\n');
 
         vscode.window.showInformationMessage(message, { modal: true });
     }
@@ -911,7 +1038,7 @@ export class CommandHandler {
         });
 
         this.treeDataProvider.refresh();
-        vscode.window.showInformationMessage('All apps pulled');
+        showTimedNotification('✓ All apps pulled');
     }
 
     /**

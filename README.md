@@ -128,16 +128,22 @@ Modify `app.yml` with full IDE support → Right-click → **Push to Dify** → 
 
 ```
 your-workspace/
-├── MyCompanyDify/                    # Platform
-│   ├── .platform.yml                 # Platform config
-│   └── dev@company.com/              # Account
-│       ├── .account.yml              # Account config  
-│       ├── .secrets.yml              # Credentials (gitignored)
-│       ├── CustomerServiceBot/       # App
-│       │   ├── app.yml               # ← Edit this file!
-│       │   └── .sync.yml             # Sync metadata
-│       └── SalesWorkflow/
-│           └── ...
+├── MyCompanyDify/                          # Platform
+│   ├── .platform.yml                       # Platform config
+│   └── dev@company.com/                    # Account
+│       ├── .account.yml                    # Account config  
+│       ├── .secrets.yml                    # Credentials (gitignored)
+│       └── My Workspace/                   # Workspace
+│           ├── .workspace.yml              # Workspace config
+│           ├── studio/                     # Apps (Studio)
+│           │   ├── CustomerServiceBot/
+│           │   │   ├── app.yml             # ← Edit this file!
+│           │   │   └── .sync.yml           # Sync metadata
+│           │   └── SalesWorkflow/
+│           │       └── ...
+│           ├── knowledge/                  # Knowledge bases (coming soon)
+│           ├── tools/                      # Custom tools (coming soon)
+│           └── plugins/                    # Plugins (coming soon)
 └── DifyCloud/
     └── ...
 ```

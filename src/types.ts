@@ -17,10 +17,16 @@ export interface PlatformConfig {
     url: string;
 }
 
-// Account config
+// Account config (simplified - workspaces are now derived from directory structure)
 export interface AccountConfig {
     email: string;
-    apps: AppInfo[];
+}
+
+// Workspace config
+export interface WorkspaceConfig {
+    id: string;
+    name: string;
+    role: UserRole;
 }
 
 // Secrets config
@@ -29,25 +35,22 @@ export interface SecretsConfig {
     token?: string;
 }
 
-// App info
-export interface AppInfo {
-    id: string;
-    name: string;
-    type: AppType;
-    role?: UserRole;
-    readonly?: boolean;
-}
-
-// Sync metadata
+// Sync metadata (single source of truth for app metadata)
 export interface SyncMetadata {
     app_id: string;
+    app_type: AppType;
+    role?: UserRole;
+    readonly?: boolean;
     last_synced_at: string;
     remote_updated_at: string;
     local_hash: string;
 }
 
+// Resource folder type
+export type ResourceFolderType = 'studio' | 'knowledge' | 'tools' | 'plugins';
+
 // Tree node type
-export type TreeNodeType = 'platform' | 'account' | 'app';
+export type TreeNodeType = 'platform' | 'account' | 'workspace' | 'resource-folder' | 'app';
 
 // Platform node data
 export interface PlatformNodeData {
@@ -66,6 +69,27 @@ export interface AccountNodeData {
     path: string;
 }
 
+// Workspace node data
+export interface WorkspaceNodeData {
+    type: 'workspace';
+    id: string;
+    name: string;
+    role: UserRole;
+    platformUrl: string;
+    accountEmail: string;
+    path: string;
+}
+
+// Resource folder node data (studio, knowledge, tools, plugins)
+export interface ResourceFolderNodeData {
+    type: 'resource-folder';
+    folderType: ResourceFolderType;
+    name: string;
+    platformUrl: string;
+    accountEmail: string;
+    path: string;
+}
+
 // App node data
 export interface AppNodeData {
     type: 'app';
@@ -81,7 +105,23 @@ export interface AppNodeData {
 }
 
 // Unified node data type
-export type TreeNodeData = PlatformNodeData | AccountNodeData | AppNodeData;
+export type TreeNodeData = PlatformNodeData | AccountNodeData | WorkspaceNodeData | ResourceFolderNodeData | AppNodeData;
+
+// Resource folder display names
+export const RESOURCE_FOLDER_NAMES: Record<ResourceFolderType, string> = {
+    'studio': 'Studio',
+    'knowledge': 'Knowledge',
+    'tools': 'Tools',
+    'plugins': 'Plugins',
+};
+
+// Resource folder icons
+export const RESOURCE_FOLDER_ICONS: Record<ResourceFolderType, string> = {
+    'studio': 'symbol-method',
+    'knowledge': 'book',
+    'tools': 'tools',
+    'plugins': 'extensions',
+};
 
 // Dify API response types
 export interface DifyLoginResponse {
@@ -115,6 +155,14 @@ export interface DifyExportResponse {
     data: string; // YAML DSL content
 }
 
+// Dify workspace/tenant response
+export interface DifyWorkspace {
+    id: string;
+    name: string;
+    role: string;
+    current: boolean;
+}
+
 // App mode to type mapping
 export const APP_MODE_TO_TYPE: Record<string, AppType> = {
     'chat': 'chatbot',
@@ -139,4 +187,12 @@ export const ROLE_ICONS: Record<UserRole, string> = {
     'admin': '👑',
     'editor': '',
     'viewer': '🔒',
+};
+
+// Workspace role icons
+export const WORKSPACE_ROLE_ICONS: Record<UserRole, string> = {
+    'owner': '👑',
+    'admin': '🔧',
+    'editor': '',
+    'viewer': '👁️',
 };

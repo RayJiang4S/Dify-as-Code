@@ -2,7 +2,7 @@
   "name": "dify-as-code",
   "displayName": "Dify as Code",
   "description": "Develop Dify apps like writing code: edit locally, version control, sync with one click",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "dify-as-code",
   "icon": "resources/icon.png",
   "repository": {
@@ -93,6 +93,12 @@
       {
         "command": "dify.pullAccount",
         "title": "Pull Account Updates",
+        "category": "Dify",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "dify.pullWorkspace",
+        "title": "Pull Workspace Updates",
         "category": "Dify",
         "icon": "$(arrow-down)"
       },
@@ -194,6 +200,11 @@
           "group": "3_delete@1"
         },
         {
+          "command": "dify.pullWorkspace",
+          "when": "view == difyAsCode && viewItem == workspace",
+          "group": "1_sync@1"
+        },
+        {
           "command": "dify.openAppConfig",
           "when": "view == difyAsCode && viewItem =~ /^app/",
           "group": "1_open@1"
@@ -248,6 +259,9 @@
         },
         {
           "command": "dify.pullAccount"
+        },
+        {
+          "command": "dify.pullWorkspace"
         },
         {
           "command": "dify.openAppConfig"
