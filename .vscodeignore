@@ -1,12 +1,13 @@
 .vscode/**
 .vscode-test/**
 src/**
+scripts/**
+docs/**
 .gitignore
 .eslintrc.json
 tsconfig.json
+esbuild.js
 **/*.map
 **/*.ts
-!out/**
+!out/extension.js
 node_modules/**
-!node_modules/axios/**
-!node_modules/js-yaml/**

@@ -156,15 +156,40 @@ export class DifyApiClient {
 
     /**
      * Login
+     * Note: Different Dify versions handle passwords differently:
+     * - Newer versions expect Base64-encoded passwords
+     * - Older versions expect plaintext passwords
+     * This method tries both approaches automatically.
      */
     async login(email: string, password: string): Promise<boolean> {
+        // Try Base64-encoded password first (newer Dify versions)
+        const encodedResult = await this.tryLogin(email, encryptField(password));
+        if (encodedResult) {
+            return true;
+        }
+        
+        console.log('[DifyAPI] Base64 encoded password failed, trying plaintext...');
+        
+        // Fallback to plaintext password (older Dify versions)
+        const plaintextResult = await this.tryLogin(email, password);
+        if (plaintextResult) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Internal login attempt helper
+     */
+    private async tryLogin(email: string, processedPassword: string): Promise<boolean> {
         try {
             console.log(`[DifyAPI] Attempting login to ${this.baseUrl} with email: ${email}`);
             console.log(`[DifyAPI] Request URL: ${this.baseUrl}/console/api/login`);
             
             const response = await this.client.post('/console/api/login', {
                 email,
-                password: encryptField(password),
+                password: processedPassword,
                 remember_me: true,
             });
 
@@ -220,14 +245,14 @@ export class DifyApiClient {
                 return true;
             }
 
-            console.log('[DifyAPI] Login failed: unexpected response format');
+            console.log('[DifyAPI] Login attempt: unexpected response format');
             return false;
         } catch (error: unknown) {
             const axiosError = error as AxiosError;
-            console.error('[DifyAPI] Login failed:', axiosError.message);
+            console.log('[DifyAPI] Login attempt failed:', axiosError.message);
             if (axiosError.response) {
-                console.error('[DifyAPI] Response status:', axiosError.response.status);
-                console.error('[DifyAPI] Response data:', JSON.stringify(axiosError.response.data, null, 2));
+                console.log('[DifyAPI] Response status:', axiosError.response.status);
+                console.log('[DifyAPI] Response data:', JSON.stringify(axiosError.response.data, null, 2));
             }
             return false;
         }
