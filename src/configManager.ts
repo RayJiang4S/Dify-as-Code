@@ -21,6 +21,10 @@ import {
     AppNodeData,
     SyncStatus,
     APP_MODE_TO_TYPE,
+    ModelsRegistry,
+    KnowledgeRegistry,
+    ToolsRegistry,
+    PluginsRegistry,
 } from './types';
 
 export class ConfigManager {
@@ -343,7 +347,7 @@ export class ConfigManager {
      * Ensure workspace has all required subdirectories
      */
     async ensureWorkspaceStructure(workspacePath: string): Promise<void> {
-        const subdirs = ['studio', 'knowledge', 'tools', 'plugins'];
+        const subdirs = ['studio', 'knowledge', 'tools', 'plugins', 'models'];
         
         for (const subdir of subdirs) {
             const subdirPath = path.join(workspacePath, subdir);
@@ -620,6 +624,521 @@ export class ConfigManager {
      */
     async deleteApp(appPath: string): Promise<void> {
         await fs.promises.rm(appPath, { recursive: true, force: true });
+    }
+
+    // ==================== Models Operations ====================
+
+    /**
+     * Save models registry to workspace/models/ directory
+     * Creates a models.yml file with all available models information
+     */
+    async saveModelsRegistry(workspacePath: string, registry: ModelsRegistry): Promise<string> {
+        const modelsPath = path.join(workspacePath, 'models');
+        
+        // Ensure models directory exists
+        await fs.promises.mkdir(modelsPath, { recursive: true });
+        
+        // Save the main models registry file
+        const registryPath = path.join(modelsPath, 'models.yml');
+        const content = yaml.dump(registry, {
+            indent: 2,
+            lineWidth: 120,
+            noRefs: true,
+        });
+        await fs.promises.writeFile(registryPath, content, 'utf-8');
+        
+        console.log(`[ConfigManager] Models registry saved: ${registry.providers.length} providers, total models: ${registry.providers.reduce((sum, p) => sum + p.models.length, 0)}`);
+        
+        return registryPath;
+    }
+
+    /**
+     * Read models registry from workspace
+     */
+    async readModelsRegistry(workspacePath: string): Promise<ModelsRegistry | null> {
+        const registryPath = path.join(workspacePath, 'models', 'models.yml');
+        
+        try {
+            if (fs.existsSync(registryPath)) {
+                const content = await fs.promises.readFile(registryPath, 'utf-8');
+                return yaml.load(content) as ModelsRegistry;
+            }
+        } catch (error) {
+            console.error('Failed to read models registry:', error);
+        }
+        
+        return null;
+    }
+
+    /**
+     * Check if models directory exists and has content
+     */
+    hasModelsRegistry(workspacePath: string): boolean {
+        const registryPath = path.join(workspacePath, 'models', 'models.yml');
+        return fs.existsSync(registryPath);
+    }
+
+    // ==================== Knowledge Operations ====================
+
+    /**
+     * Save knowledge registry to workspace/knowledge/ directory
+     */
+    async saveKnowledgeRegistry(workspacePath: string, registry: KnowledgeRegistry): Promise<string> {
+        const knowledgePath = path.join(workspacePath, 'knowledge');
+        
+        // Ensure knowledge directory exists
+        await fs.promises.mkdir(knowledgePath, { recursive: true });
+        
+        // Save the knowledge registry file
+        const registryPath = path.join(knowledgePath, 'knowledge.yml');
+        const content = yaml.dump(registry, {
+            indent: 2,
+            lineWidth: 120,
+            noRefs: true,
+        });
+        await fs.promises.writeFile(registryPath, content, 'utf-8');
+        
+        console.log(`[ConfigManager] Knowledge registry saved: ${registry.datasets.length} datasets`);
+        
+        return registryPath;
+    }
+
+    /**
+     * Read knowledge registry from workspace
+     */
+    async readKnowledgeRegistry(workspacePath: string): Promise<KnowledgeRegistry | null> {
+        const registryPath = path.join(workspacePath, 'knowledge', 'knowledge.yml');
+        
+        try {
+            if (fs.existsSync(registryPath)) {
+                const content = await fs.promises.readFile(registryPath, 'utf-8');
+                return yaml.load(content) as KnowledgeRegistry;
+            }
+        } catch (error) {
+            console.error('Failed to read knowledge registry:', error);
+        }
+        
+        return null;
+    }
+
+    // ==================== Tools Operations ====================
+
+    /**
+     * Save tools registry to workspace/tools/ directory
+     */
+    async saveToolsRegistry(workspacePath: string, registry: ToolsRegistry): Promise<string> {
+        const toolsPath = path.join(workspacePath, 'tools');
+        
+        // Ensure tools directory exists
+        await fs.promises.mkdir(toolsPath, { recursive: true });
+        
+        // Save the tools registry file
+        const registryPath = path.join(toolsPath, 'tools.yml');
+        const content = yaml.dump(registry, {
+            indent: 2,
+            lineWidth: 120,
+            noRefs: true,
+        });
+        await fs.promises.writeFile(registryPath, content, 'utf-8');
+        
+        console.log(`[ConfigManager] Tools registry saved: ${registry.providers.length} providers`);
+        
+        return registryPath;
+    }
+
+    /**
+     * Read tools registry from workspace
+     */
+    async readToolsRegistry(workspacePath: string): Promise<ToolsRegistry | null> {
+        const registryPath = path.join(workspacePath, 'tools', 'tools.yml');
+        
+        try {
+            if (fs.existsSync(registryPath)) {
+                const content = await fs.promises.readFile(registryPath, 'utf-8');
+                return yaml.load(content) as ToolsRegistry;
+            }
+        } catch (error) {
+            console.error('Failed to read tools registry:', error);
+        }
+        
+        return null;
+    }
+
+    // ==================== Plugins Operations ====================
+
+    /**
+     * Save plugins registry to workspace/plugins/ directory
+     */
+    async savePluginsRegistry(workspacePath: string, registry: PluginsRegistry): Promise<string> {
+        const pluginsPath = path.join(workspacePath, 'plugins');
+        
+        // Ensure plugins directory exists
+        await fs.promises.mkdir(pluginsPath, { recursive: true });
+        
+        // Save the plugins registry file
+        const registryPath = path.join(pluginsPath, 'plugins.yml');
+        const content = yaml.dump(registry, {
+            indent: 2,
+            lineWidth: 120,
+            noRefs: true,
+        });
+        await fs.promises.writeFile(registryPath, content, 'utf-8');
+        
+        console.log(`[ConfigManager] Plugins registry saved: ${registry.plugins.length} plugins`);
+        
+        return registryPath;
+    }
+
+    /**
+     * Read plugins registry from workspace
+     */
+    async readPluginsRegistry(workspacePath: string): Promise<PluginsRegistry | null> {
+        const registryPath = path.join(workspacePath, 'plugins', 'plugins.yml');
+        
+        try {
+            if (fs.existsSync(registryPath)) {
+                const content = await fs.promises.readFile(registryPath, 'utf-8');
+                return yaml.load(content) as PluginsRegistry;
+            }
+        } catch (error) {
+            console.error('Failed to read plugins registry:', error);
+        }
+        
+        return null;
+    }
+
+    // ==================== Knowledge Documents Operations ====================
+
+    /**
+     * Save a knowledge base's documents to local directory
+     * Creates workspace/knowledge/{dataset_name}/ directory with documents
+     * 
+     * Key behavior: Only saves documents that don't exist locally (local-first)
+     * - If local file exists: skip (preserve local content)
+     * - If local file doesn't exist: save from remote (smart de-overlap)
+     */
+    async saveKnowledgeDocuments(
+        workspacePath: string,
+        datasetId: string,
+        datasetName: string,
+        documents: Array<{
+            id: string;
+            name: string;
+            content: string;
+            segments?: Array<{ id: string; position: number; content: string; answer?: string; keywords?: string[] }>;
+        }>,
+        chunkOverlap: number = 50  // Default overlap size for de-duplication
+    ): Promise<{ saved: number; skipped: number; datasetPath: string }> {
+        const safeName = this.sanitizeName(datasetName);
+        const datasetPath = path.join(workspacePath, 'knowledge', safeName);
+        
+        // Ensure dataset directory exists
+        await fs.promises.mkdir(datasetPath, { recursive: true });
+        
+        let savedCount = 0;
+        let skippedCount = 0;
+        
+        // Save each document as plain text (original content)
+        for (const doc of documents) {
+            const docSafeName = this.sanitizeName(doc.name);
+            // Determine file extension based on original document name
+            const originalExt = path.extname(doc.name);
+            const ext = originalExt || '.txt';
+            const docPath = path.join(datasetPath, `${docSafeName}${ext}`);
+            
+            // Check if local file already exists - if so, skip (local-first)
+            if (fs.existsSync(docPath)) {
+                console.log(`[ConfigManager] Skipping existing local file: ${docSafeName}${ext}`);
+                skippedCount++;
+                continue;
+            }
+            
+            // Smart de-overlap: reconstruct content from segments
+            let content = '';
+            if (doc.segments && doc.segments.length > 0) {
+                // Sort by position
+                const sortedSegments = [...doc.segments].sort((a, b) => a.position - b.position);
+                
+                // First segment is kept entirely
+                content = sortedSegments[0].content;
+                
+                // For subsequent segments, try to remove overlap
+                for (let i = 1; i < sortedSegments.length; i++) {
+                    const currentSegment = sortedSegments[i].content;
+                    const previousEnd = content.slice(-chunkOverlap * 2); // Look at end of current content
+                    
+                    // Try to find overlap by checking if start of current segment appears in previous end
+                    let overlapFound = false;
+                    for (let overlapSize = Math.min(chunkOverlap * 2, currentSegment.length); overlapSize > 0; overlapSize--) {
+                        const segmentStart = currentSegment.slice(0, overlapSize);
+                        const overlapIndex = previousEnd.lastIndexOf(segmentStart);
+                        if (overlapIndex !== -1 && overlapIndex >= previousEnd.length - overlapSize - 10) {
+                            // Found overlap, append only the non-overlapping part
+                            content += '\n\n' + currentSegment.slice(overlapSize);
+                            overlapFound = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!overlapFound) {
+                        // No overlap found, just append with separator
+                        content += '\n\n' + currentSegment;
+                    }
+                }
+            } else {
+                content = doc.content || '';
+            }
+            
+            await fs.promises.writeFile(docPath, content, 'utf-8');
+            savedCount++;
+            console.log(`[ConfigManager] Saved document: ${docSafeName}${ext}`);
+        }
+        
+        // Read existing sync metadata to preserve local-only documents
+        const syncPath = path.join(datasetPath, '.sync.yml');
+        let existingDocs: Array<{ id: string; name: string; file: string; is_local?: boolean }> = [];
+        if (fs.existsSync(syncPath)) {
+            try {
+                const existingContent = await fs.promises.readFile(syncPath, 'utf-8');
+                const existing = yaml.load(existingContent) as { documents?: typeof existingDocs };
+                existingDocs = existing.documents || [];
+            } catch {
+                // Ignore
+            }
+        }
+        
+        // Merge remote documents with existing local-only documents
+        const remoteDocIds = new Set(documents.map(d => d.id));
+        const localOnlyDocs = existingDocs.filter(d => d.is_local && !remoteDocIds.has(d.id));
+        
+        // Build new document list
+        const allDocs = [
+            ...documents.map(d => {
+                const originalExt = path.extname(d.name);
+                const ext = originalExt || '.txt';
+                return {
+                    id: d.id,
+                    name: d.name,
+                    file: `${this.sanitizeName(d.name)}${ext}`,
+                    segment_count: d.segments?.length || 0,
+                    is_local: false,
+                };
+            }),
+            ...localOnlyDocs,
+        ];
+        
+        // Save sync metadata
+        const syncMetadata = {
+            dataset_id: datasetId,
+            dataset_name: datasetName,
+            last_synced_at: new Date().toISOString(),
+            document_count: allDocs.length,
+            documents: allDocs,
+        };
+        await fs.promises.writeFile(syncPath, yaml.dump(syncMetadata, { indent: 2, lineWidth: 120 }), 'utf-8');
+        
+        console.log(`[ConfigManager] Knowledge documents: ${savedCount} saved, ${skippedCount} skipped (local-first) in ${datasetName}`);
+        
+        return { saved: savedCount, skipped: skippedCount, datasetPath };
+    }
+
+    /**
+     * Create a new local document in a knowledge base
+     * This document will be marked as local-only until pushed to remote
+     */
+    async createLocalDocument(
+        workspacePath: string,
+        datasetName: string,
+        documentName: string,
+        content: string = ''
+    ): Promise<string> {
+        const safeName = this.sanitizeName(datasetName);
+        const datasetPath = path.join(workspacePath, 'knowledge', safeName);
+        
+        // Ensure dataset directory exists
+        await fs.promises.mkdir(datasetPath, { recursive: true });
+        
+        // Determine file path
+        const docSafeName = this.sanitizeName(documentName);
+        const originalExt = path.extname(documentName);
+        const ext = originalExt || '.txt';
+        const docPath = path.join(datasetPath, `${docSafeName}${ext}`);
+        
+        // Check if file already exists
+        if (fs.existsSync(docPath)) {
+            throw new Error(`Document "${documentName}" already exists`);
+        }
+        
+        // Create the document file
+        await fs.promises.writeFile(docPath, content, 'utf-8');
+        
+        // Update sync metadata to mark as local-only
+        const syncPath = path.join(datasetPath, '.sync.yml');
+        let syncMetadata: {
+            dataset_id: string;
+            dataset_name: string;
+            last_synced_at: string;
+            document_count: number;
+            documents: Array<{ id: string; name: string; file: string; is_local?: boolean }>;
+        } = {
+            dataset_id: '',
+            dataset_name: datasetName,
+            last_synced_at: new Date().toISOString(),
+            document_count: 0,
+            documents: [],
+        };
+        
+        if (fs.existsSync(syncPath)) {
+            try {
+                const existingContent = await fs.promises.readFile(syncPath, 'utf-8');
+                syncMetadata = yaml.load(existingContent) as typeof syncMetadata;
+            } catch {
+                // Ignore
+            }
+        }
+        
+        // Add new local document
+        syncMetadata.documents.push({
+            id: `local-${Date.now()}`,  // Temporary ID for local-only documents
+            name: documentName,
+            file: `${docSafeName}${ext}`,
+            is_local: true,
+        });
+        syncMetadata.document_count = syncMetadata.documents.length;
+        syncMetadata.last_synced_at = new Date().toISOString();
+        
+        await fs.promises.writeFile(syncPath, yaml.dump(syncMetadata, { indent: 2, lineWidth: 120 }), 'utf-8');
+        
+        console.log(`[ConfigManager] Created local document: ${documentName}`);
+        
+        return docPath;
+    }
+
+    /**
+     * Read knowledge base documents from local directory
+     */
+    async readKnowledgeDocuments(workspacePath: string, datasetName: string): Promise<{
+        syncMetadata: { dataset_id: string; dataset_name: string; last_synced_at: string; document_count: number; documents: Array<{ id: string; name: string; file: string; is_local?: boolean }> } | null;
+        documents: Array<{ id: string; name: string; file: string; content: string; is_local?: boolean }>;
+    }> {
+        const safeName = this.sanitizeName(datasetName);
+        const datasetPath = path.join(workspacePath, 'knowledge', safeName);
+        
+        const result: {
+            syncMetadata: { dataset_id: string; dataset_name: string; last_synced_at: string; document_count: number; documents: Array<{ id: string; name: string; file: string; is_local?: boolean }> } | null;
+            documents: Array<{ id: string; name: string; file: string; content: string; is_local?: boolean }>;
+        } = {
+            syncMetadata: null,
+            documents: [],
+        };
+        
+        if (!fs.existsSync(datasetPath)) {
+            return result;
+        }
+        
+        // Read sync metadata
+        const syncPath = path.join(datasetPath, '.sync.yml');
+        if (fs.existsSync(syncPath)) {
+            try {
+                const content = await fs.promises.readFile(syncPath, 'utf-8');
+                result.syncMetadata = yaml.load(content) as typeof result.syncMetadata;
+            } catch (error) {
+                console.error('Failed to read knowledge sync metadata:', error);
+            }
+        }
+        
+        // Read documents based on sync metadata
+        if (result.syncMetadata?.documents) {
+            for (const docMeta of result.syncMetadata.documents) {
+                const filePath = path.join(datasetPath, docMeta.file);
+                if (fs.existsSync(filePath)) {
+                    try {
+                        const content = await fs.promises.readFile(filePath, 'utf-8');
+                        result.documents.push({
+                            id: docMeta.id,
+                            name: docMeta.name,
+                            file: docMeta.file,
+                            content,
+                            is_local: docMeta.is_local,
+                        });
+                    } catch (error) {
+                        console.error(`Failed to read document ${docMeta.file}:`, error);
+                    }
+                }
+            }
+        }
+        
+        return result;
+    }
+
+    /**
+     * Get all synced knowledge bases for a workspace
+     */
+    async getSyncedKnowledgeBases(workspacePath: string): Promise<Array<{
+        datasetId: string;
+        datasetName: string;
+        path: string;
+        documentCount: number;
+        lastSyncedAt: string;
+    }>> {
+        const knowledgePath = path.join(workspacePath, 'knowledge');
+        const result: Array<{
+            datasetId: string;
+            datasetName: string;
+            path: string;
+            documentCount: number;
+            lastSyncedAt: string;
+        }> = [];
+        
+        if (!fs.existsSync(knowledgePath)) {
+            return result;
+        }
+        
+        try {
+            const entries = await fs.promises.readdir(knowledgePath, { withFileTypes: true });
+            
+            for (const entry of entries) {
+                if (entry.isDirectory() && !entry.name.startsWith('.')) {
+                    const datasetPath = path.join(knowledgePath, entry.name);
+                    const syncPath = path.join(datasetPath, '.sync.yml');
+                    
+                    if (fs.existsSync(syncPath)) {
+                        try {
+                            const content = await fs.promises.readFile(syncPath, 'utf-8');
+                            const syncData = yaml.load(content) as {
+                                dataset_id: string;
+                                dataset_name: string;
+                                last_synced_at: string;
+                                document_count: number;
+                            };
+                            
+                            result.push({
+                                datasetId: syncData.dataset_id,
+                                datasetName: syncData.dataset_name,
+                                path: datasetPath,
+                                documentCount: syncData.document_count,
+                                lastSyncedAt: syncData.last_synced_at,
+                            });
+                        } catch (error) {
+                            console.error(`Failed to read sync metadata for ${entry.name}:`, error);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Failed to read synced knowledge bases:', error);
+        }
+        
+        return result;
+    }
+
+    /**
+     * Check if a knowledge base has been synced
+     */
+    hasKnowledgeSync(workspacePath: string, datasetName: string): boolean {
+        const safeName = this.sanitizeName(datasetName);
+        const syncPath = path.join(workspacePath, 'knowledge', safeName, '.sync.yml');
+        return fs.existsSync(syncPath);
     }
 
     /**

@@ -49,6 +49,14 @@ Building AI apps with [Dify](https://dify.ai) is amazing, but managing them in a
 ### 🔄 Bi-directional Sync
 Pull app configurations (DSL) from Dify to local files, edit with your favorite tools, then push changes back. Your local `app.yml` is the single source of truth.
 
+### 📦 Full Resource Synchronization
+Not just apps — sync your entire Dify workspace:
+- **Studio Apps** — Workflows, Chatflows, Agents, Chat Assistants
+- **Models** — All configured LLM, Embedding, Rerank, TTS, STT models
+- **Knowledge Bases** — 🚧 *Coming soon*
+- **Tools** — Built-in and custom tool configurations
+- **Plugins** — Installed plugin details
+
 ### 🏢 Multi-Platform & Multi-Account
 Manage Dify Cloud, self-hosted instances, and multiple accounts — all from one sidebar. Switch between environments effortlessly.
 
@@ -118,6 +126,7 @@ Modify `app.yml` with full IDE support → Right-click → **Push to Dify** → 
 | **Add Account** | Add login credentials under a platform |
 | **Pull Updates** | Download latest app configurations |
 | **Push to Dify** | Upload local changes to cloud draft |
+| **New App** | Create a new Workflow or Chatflow app |
 | **Copy as New App** | Duplicate an app with new name |
 | **Open in Dify** | Jump to Dify editor in browser |
 | **View Sync Status** | Check sync state and timestamps |
@@ -141,9 +150,13 @@ your-workspace/
 │           │   │   └── .sync.yml           # Sync metadata
 │           │   └── SalesWorkflow/
 │           │       └── ...
+│           ├── models/                     # Model configurations
+│           │   └── models.yml              # All LLM/Embedding/Rerank models
 │           ├── knowledge/                  # Knowledge bases (coming soon)
-│           ├── tools/                      # Custom tools (coming soon)
-│           └── plugins/                    # Plugins (coming soon)
+│           ├── tools/                      # Tool configurations
+│           │   └── tools.yml               # Built-in and custom tools
+│           └── plugins/                    # Plugin configurations
+│               └── plugins.yml             # Installed plugins
 └── DifyCloud/
     └── ...
 ```

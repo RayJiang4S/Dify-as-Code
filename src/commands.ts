@@ -7,7 +7,8 @@ import * as path from 'path';
 import { DifyTreeDataProvider, DifyTreeItem } from './treeDataProvider';
 import { ConfigManager } from './configManager';
 import { getApiClient, removeApiClient } from './difyApi';
-import { PlatformNodeData, AccountNodeData, WorkspaceNodeData, AppNodeData, APP_MODE_TO_TYPE } from './types';
+import { PlatformNodeData, AccountNodeData, WorkspaceNodeData, AppNodeData, ModelsFileNodeData, ResourceFileNodeData, ResourceFolderNodeData, KnowledgeNodeData, DocumentNodeData, APP_MODE_TO_TYPE, AppType } from './types';
+import * as yaml from 'js-yaml';
 
 /**
  * Format date to YYYY-MM-DDTHH:mm:ss (compact, no line break)
@@ -98,6 +99,8 @@ export class CommandHandler {
             vscode.commands.registerCommand('dify.pullWorkspace', (item: DifyTreeItem) => this.pullWorkspace(item)),
             
             vscode.commands.registerCommand('dify.openAppConfig', (item: DifyTreeItem) => this.openAppConfig(item)),
+            vscode.commands.registerCommand('dify.openModelsFile', (item: DifyTreeItem) => this.openModelsFile(item)),
+            vscode.commands.registerCommand('dify.openResourceFile', (item: DifyTreeItem) => this.openResourceFile(item)),
             vscode.commands.registerCommand('dify.openInDify', (item: DifyTreeItem) => this.openInDify(item)),
             vscode.commands.registerCommand('dify.pullApp', (item: DifyTreeItem) => this.pullApp(item)),
             vscode.commands.registerCommand('dify.pushApp', (item: DifyTreeItem) => this.pushApp(item)),
@@ -106,6 +109,15 @@ export class CommandHandler {
             
             vscode.commands.registerCommand('dify.pullAll', () => this.pullAll()),
             vscode.commands.registerCommand('dify.refreshTree', () => this.refreshTree()),
+            
+            // Knowledge commands
+            vscode.commands.registerCommand('dify.pullKnowledge', (item: DifyTreeItem) => this.pullKnowledge(item)),
+            vscode.commands.registerCommand('dify.pushKnowledge', (item: DifyTreeItem) => this.pushKnowledge(item)),
+            vscode.commands.registerCommand('dify.unlinkKnowledge', (item: DifyTreeItem) => this.unlinkKnowledge(item)),
+            vscode.commands.registerCommand('dify.createKnowledgeDocument', (item: DifyTreeItem) => this.createKnowledgeDocument(item)),
+            
+            // App creation commands
+            vscode.commands.registerCommand('dify.createApp', (item: DifyTreeItem) => this.createApp(item)),
         );
     }
 
@@ -423,6 +435,46 @@ export class CommandHandler {
                             console.error(`Failed to export app ${app.name}:`, error);
                         }
                     }
+
+                    // Pull models registry for this workspace
+                    try {
+                        console.log(`[AddAccount] Pulling models registry for workspace: ${ws.name}...`);
+                        const modelsRegistry = await client.getAllModels();
+                        await configManager.saveModelsRegistry(workspace.path, modelsRegistry);
+                        console.log(`[AddAccount] Models registry saved: ${modelsRegistry.providers.length} providers`);
+                    } catch (error) {
+                        console.error(`Failed to pull models registry for ${ws.name}:`, error);
+                    }
+
+                    // Pull knowledge registry for this workspace
+                    try {
+                        console.log(`[AddAccount] Pulling knowledge registry for workspace: ${ws.name}...`);
+                        const knowledgeRegistry = await client.getAllKnowledge();
+                        await configManager.saveKnowledgeRegistry(workspace.path, knowledgeRegistry);
+                        console.log(`[AddAccount] Knowledge registry saved: ${knowledgeRegistry.datasets.length} datasets`);
+                    } catch (error) {
+                        console.error(`Failed to pull knowledge registry for ${ws.name}:`, error);
+                    }
+
+                    // Pull tools registry for this workspace
+                    try {
+                        console.log(`[AddAccount] Pulling tools registry for workspace: ${ws.name}...`);
+                        const toolsRegistry = await client.getAllTools();
+                        await configManager.saveToolsRegistry(workspace.path, toolsRegistry);
+                        console.log(`[AddAccount] Tools registry saved: ${toolsRegistry.providers.length} providers`);
+                    } catch (error) {
+                        console.error(`Failed to pull tools registry for ${ws.name}:`, error);
+                    }
+
+                    // Pull plugins registry for this workspace
+                    try {
+                        console.log(`[AddAccount] Pulling plugins registry for workspace: ${ws.name}...`);
+                        const pluginsRegistry = await client.getAllPlugins();
+                        await configManager.savePluginsRegistry(workspace.path, pluginsRegistry);
+                        console.log(`[AddAccount] Plugins registry saved: ${pluginsRegistry.plugins.length} plugins`);
+                    } catch (error) {
+                        console.error(`Failed to pull plugins registry for ${ws.name}:`, error);
+                    }
                 }
             });
 
@@ -651,6 +703,111 @@ export class CommandHandler {
                 }
             }
         }
+
+        // Pull models registry
+        try {
+            console.log(`[PullWorkspace] Pulling models registry...`);
+            const modelsRegistry = await client.getAllModels();
+            await configManager.saveModelsRegistry(workspace.path, modelsRegistry);
+            console.log(`[PullWorkspace] Models registry saved: ${modelsRegistry.providers.length} providers`);
+        } catch (error) {
+            console.error(`[PullWorkspace] Failed to pull models registry:`, error);
+        }
+
+        // Pull knowledge registry
+        try {
+            console.log(`[PullWorkspace] Pulling knowledge registry...`);
+            const knowledgeRegistry = await client.getAllKnowledge();
+            await configManager.saveKnowledgeRegistry(workspace.path, knowledgeRegistry);
+            console.log(`[PullWorkspace] Knowledge registry saved: ${knowledgeRegistry.datasets.length} datasets`);
+            
+            // Update already-synced knowledge bases
+            const syncedKnowledgeBases = await configManager.getSyncedKnowledgeBases(workspace.path);
+            console.log(`[PullWorkspace] Found ${syncedKnowledgeBases.length} synced knowledge bases to update`);
+            
+            for (const syncedKb of syncedKnowledgeBases) {
+                // Check if this knowledge base still exists in the registry
+                const stillExists = knowledgeRegistry.datasets.some(d => d.id === syncedKb.datasetId);
+                if (!stillExists) {
+                    console.log(`[PullWorkspace] Knowledge base ${syncedKb.datasetName} no longer exists, skipping...`);
+                    continue;
+                }
+                
+                try {
+                    console.log(`[PullWorkspace] Updating synced knowledge base: ${syncedKb.datasetName}`);
+                    
+                    // Fetch documents
+                    const documents = await client.getDatasetDocuments(syncedKb.datasetId);
+                    
+                    // Fetch segments for each document
+                    const documentsWithContent: Array<{
+                        id: string;
+                        name: string;
+                        content: string;
+                        segments: Array<{ id: string; position: number; content: string; answer?: string; keywords?: string[] }>;
+                    }> = [];
+                    
+                    for (const doc of documents) {
+                        try {
+                            const segments = await client.getDocumentSegments(syncedKb.datasetId, doc.id);
+                            documentsWithContent.push({
+                                id: doc.id,
+                                name: doc.name,
+                                content: segments.map(s => s.content).join('\n\n'),
+                                segments: segments.map(s => ({
+                                    id: s.id,
+                                    position: s.position,
+                                    content: s.content,
+                                    answer: s.answer,
+                                    keywords: s.keywords,
+                                })),
+                            });
+                        } catch (error) {
+                            console.error(`Failed to fetch segments for ${doc.name}:`, error);
+                            documentsWithContent.push({
+                                id: doc.id,
+                                name: doc.name,
+                                content: '',
+                                segments: [],
+                            });
+                        }
+                    }
+                    
+                    // Save updated documents
+                    await configManager.saveKnowledgeDocuments(
+                        workspace.path,
+                        syncedKb.datasetId,
+                        syncedKb.datasetName,
+                        documentsWithContent
+                    );
+                    console.log(`[PullWorkspace] Updated knowledge base: ${syncedKb.datasetName} (${documents.length} documents)`);
+                } catch (error) {
+                    console.error(`[PullWorkspace] Failed to update knowledge base ${syncedKb.datasetName}:`, error);
+                }
+            }
+        } catch (error) {
+            console.error(`[PullWorkspace] Failed to pull knowledge registry:`, error);
+        }
+
+        // Pull tools registry
+        try {
+            console.log(`[PullWorkspace] Pulling tools registry...`);
+            const toolsRegistry = await client.getAllTools();
+            await configManager.saveToolsRegistry(workspace.path, toolsRegistry);
+            console.log(`[PullWorkspace] Tools registry saved: ${toolsRegistry.providers.length} providers`);
+        } catch (error) {
+            console.error(`[PullWorkspace] Failed to pull tools registry:`, error);
+        }
+
+        // Pull plugins registry
+        try {
+            console.log(`[PullWorkspace] Pulling plugins registry...`);
+            const pluginsRegistry = await client.getAllPlugins();
+            await configManager.savePluginsRegistry(workspace.path, pluginsRegistry);
+            console.log(`[PullWorkspace] Plugins registry saved: ${pluginsRegistry.plugins.length} plugins`);
+        } catch (error) {
+            console.error(`[PullWorkspace] Failed to pull plugins registry:`, error);
+        }
     }
 
     // ==================== Workspace Commands ====================
@@ -702,14 +859,77 @@ export class CommandHandler {
         const data = item.nodeData as AppNodeData;
         const dslPath = path.join(data.path, 'app.yml');
         
+        // Check if file exists first
+        const fs = await import('fs');
+        if (!fs.existsSync(dslPath)) {
+            const action = await vscode.window.showWarningMessage(
+                `App config file not found: ${dslPath}\n\nThis app may not have been pulled yet.`,
+                'Pull App',
+                'Cancel'
+            );
+            if (action === 'Pull App') {
+                await this.pullApp(item);
+            }
+            return;
+        }
+        
         try {
-            const doc = await vscode.workspace.openTextDocument(dslPath);
+            // Use Uri.file() to properly handle special characters in path
+            const fileUri = vscode.Uri.file(dslPath);
+            const doc = await vscode.workspace.openTextDocument(fileUri);
             await vscode.window.showTextDocument(doc, {
                 preview: false,
                 viewColumn: vscode.ViewColumn.One,
             });
         } catch (error) {
-            vscode.window.showErrorMessage(`Failed to open file: ${error}`);
+            // Fallback: try using vscode.commands to open the file
+            console.error('[OpenAppConfig] Error opening file:', error);
+            try {
+                await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(dslPath));
+            } catch (fallbackError) {
+                vscode.window.showErrorMessage(
+                    `Failed to open file. Try opening it manually from the file explorer.\n` +
+                    `Path: ${dslPath}`
+                );
+            }
+        }
+    }
+
+    /**
+     * Open models registry file
+     */
+    async openModelsFile(item: DifyTreeItem): Promise<void> {
+        if (item.nodeData.type !== 'models-file') { return; }
+        
+        const data = item.nodeData as ModelsFileNodeData;
+        
+        try {
+            const doc = await vscode.workspace.openTextDocument(data.path);
+            await vscode.window.showTextDocument(doc, {
+                preview: false,
+                viewColumn: vscode.ViewColumn.One,
+            });
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to open models file: ${error}`);
+        }
+    }
+
+    /**
+     * Open resource file (knowledge, tools, plugins)
+     */
+    async openResourceFile(item: DifyTreeItem): Promise<void> {
+        if (item.nodeData.type !== 'resource-file') { return; }
+        
+        const data = item.nodeData as ResourceFileNodeData;
+        
+        try {
+            const doc = await vscode.workspace.openTextDocument(data.path);
+            await vscode.window.showTextDocument(doc, {
+                preview: false,
+                viewColumn: vscode.ViewColumn.One,
+            });
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to open resource file: ${error}`);
         }
     }
 
@@ -795,12 +1015,34 @@ export class CommandHandler {
             return;
         }
 
-        // Check for unsynced remote updates
-        const syncMeta = await configManager.getAppSyncMetadata(data.path);
         // Path: app -> studio -> workspace -> account
         const studioPath = path.dirname(data.path);
         const workspacePath = path.dirname(studioPath);
         const accountPath = path.dirname(workspacePath);
+
+        // Check if this is a local-only app (no valid remote ID)
+        const isLocalOnly = !data.id || data.id.startsWith('local-') || data.id.trim() === '';
+        
+        if (isLocalOnly) {
+            // Handle local-only app: need to create on remote first
+            const action = await vscode.window.showWarningMessage(
+                `This app "${data.name}" only exists locally and has not been synced to Dify. ` +
+                `Would you like to create it on Dify now?`,
+                'Create on Dify',
+                'Cancel'
+            );
+            
+            if (action !== 'Create on Dify') {
+                return;
+            }
+            
+            // Create new app on remote and sync
+            await this.pushLocalOnlyApp(data, configManager, workspacePath, accountPath);
+            return;
+        }
+
+        // Check for unsynced remote updates
+        const syncMeta = await configManager.getAppSyncMetadata(data.path);
         
         if (syncMeta) {
             const password = await configManager.getAccountPassword(accountPath);
@@ -884,6 +1126,207 @@ export class CommandHandler {
 
         this.treeDataProvider.refresh();
         showTimedNotification(`✓ App pushed: ${data.name} (to draft)`);
+    }
+
+    /**
+     * Push a local-only app by creating it on Dify first
+     */
+    private async pushLocalOnlyApp(
+        data: AppNodeData,
+        configManager: ConfigManager,
+        workspacePath: string,
+        accountPath: string
+    ): Promise<void> {
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: `Creating "${data.name}" on Dify...`,
+            cancellable: false,
+        }, async () => {
+            const dsl = await configManager.readAppDsl(data.path);
+            if (!dsl) {
+                throw new Error('Failed to read app config');
+            }
+
+            const password = await configManager.getAccountPassword(accountPath);
+            if (!password) {
+                throw new Error('Account password not found');
+            }
+
+            const client = getApiClient(data.platformUrl);
+            const success = await client.login(data.accountEmail, password);
+            if (!success) {
+                throw new Error('Login failed');
+            }
+
+            // Map appType to Dify mode
+            const modeMapping: Record<string, 'workflow' | 'advanced-chat'> = {
+                'workflow': 'workflow',
+                'chatflow': 'advanced-chat',
+            };
+            const mode = modeMapping[data.appType] || 'workflow';
+
+            // Create the app on Dify
+            const newApp = await client.createApp(
+                data.name,
+                mode,
+                'emoji',
+                '🤖',
+                '#FFEAD5',
+                ''
+            );
+
+            console.log(`[PushLocalOnly] Created remote app: ${newApp.id}`);
+
+            // Now import the DSL to the newly created app
+            await client.importApp(newApp.id, dsl);
+
+            // Export to get the final DSL and updated time
+            const { dsl: remoteDsl, updatedAt } = await client.exportApp(newApp.id);
+
+            // Get app details
+            const detail = await client.getAppDetail(newApp.id);
+
+            // Update local files with new app ID
+            // First, rename the directory if needed
+            let currentPath = data.path;
+            if (detail.name !== data.name) {
+                console.log(`[PushLocalOnly] App name changed: ${data.name} -> ${detail.name}`);
+                currentPath = await configManager.renameApp(data.path, detail.name, newApp.id);
+            }
+
+            // Write the updated DSL
+            const dslPath = path.join(currentPath, 'app.yml');
+            await vscode.workspace.fs.writeFile(
+                vscode.Uri.file(dslPath),
+                Buffer.from(remoteDsl, 'utf-8')
+            );
+
+            // Update sync metadata with real app ID
+            const crypto = await import('crypto');
+            const localHash = crypto.createHash('md5').update(remoteDsl).digest('hex');
+            await configManager.updateSyncMetadata(currentPath, {
+                app_id: newApp.id,
+                app_type: data.appType,
+                last_synced_at: new Date().toISOString(),
+                remote_updated_at: updatedAt,
+                local_hash: localHash,
+            });
+        });
+
+        this.treeDataProvider.refresh();
+        showTimedNotification(`✓ App created and synced: ${data.name}`);
+    }
+
+    /**
+     * Create a new app (only Workflow and Chatflow are supported for DSL push)
+     */
+    async createApp(item: DifyTreeItem): Promise<void> {
+        if (item.nodeData.type !== 'resource-folder') { return; }
+        
+        const configManager = this.getConfigManager();
+        if (!configManager) { return; }
+
+        const data = item.nodeData as ResourceFolderNodeData;
+        if (data.folderType !== 'studio') { return; }
+
+        // Only allow types that support DSL push
+        const appType = await vscode.window.showQuickPick(
+            [
+                { label: '🔀 Workflow', description: 'Visual workflow orchestration', value: 'workflow' as const },
+                { label: '💬 Chatflow', description: 'Advanced chat with workflow', value: 'advanced-chat' as const },
+            ],
+            { placeHolder: 'Select app type (only types supporting Push are available)' }
+        );
+        if (!appType) { return; }
+
+        const appName = await vscode.window.showInputBox({
+            prompt: 'Enter app name',
+            placeHolder: 'e.g., My New Workflow',
+            validateInput: (value) => value.trim() ? null : 'Please enter app name',
+        });
+        if (!appName) { return; }
+
+        const description = await vscode.window.showInputBox({
+            prompt: 'Enter app description (optional)',
+            placeHolder: 'e.g., A workflow for data processing',
+        });
+
+        // Get account info from path structure
+        // Path: studio folder -> workspace -> account
+        const workspacePath = path.dirname(data.path);
+        const accountPath = path.dirname(workspacePath);
+        
+        // Read workspace config to get account info
+        const workspaceConfigPath = path.join(workspacePath, 'workspace.yml');
+        let platformUrl = '';
+        let accountEmail = '';
+        
+        try {
+            const workspaceConfigUri = vscode.Uri.file(workspaceConfigPath);
+            const content = await vscode.workspace.fs.readFile(workspaceConfigUri);
+            const config = yaml.load(content.toString()) as { platform_url?: string; account_email?: string };
+            platformUrl = config.platform_url || '';
+            accountEmail = config.account_email || '';
+        } catch {
+            vscode.window.showErrorMessage('Failed to read workspace config');
+            return;
+        }
+
+        if (!platformUrl || !accountEmail) {
+            vscode.window.showErrorMessage('Missing platform URL or account email in workspace config');
+            return;
+        }
+
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: `Creating new app "${appName}"...`,
+            cancellable: false,
+        }, async () => {
+            const password = await configManager.getAccountPassword(accountPath);
+            if (!password) {
+                throw new Error('Account password not found');
+            }
+
+            const client = getApiClient(platformUrl);
+            const success = await client.login(accountEmail, password);
+            if (!success) {
+                throw new Error('Login failed');
+            }
+
+            // Create app on Dify
+            const newApp = await client.createApp(
+                appName,
+                appType.value,
+                'emoji',
+                '🤖',
+                '#FFEAD5',
+                description || ''
+            );
+
+            // Export the newly created app's DSL
+            const { dsl, updatedAt } = await client.exportApp(newApp.id);
+            
+            // Map mode to appType
+            const appTypeMapping: Record<string, AppType> = {
+                'workflow': 'workflow',
+                'advanced-chat': 'chatflow',
+            };
+            
+            // Save locally
+            await configManager.saveAppDsl(
+                workspacePath,
+                newApp.id,
+                newApp.name,
+                dsl,
+                updatedAt,
+                appTypeMapping[newApp.mode] || 'workflow',
+                'owner',
+                false
+            );
+        });
+
+        showTimedNotification(`✓ App created: ${appName}`);
+        this.treeDataProvider.refresh();
     }
 
     /**
@@ -991,6 +1434,325 @@ export class CommandHandler {
         ].join('\n');
 
         vscode.window.showInformationMessage(message, { modal: true });
+    }
+
+    // ==================== Knowledge Commands ====================
+
+    /**
+     * Pull knowledge base documents
+     */
+    async pullKnowledge(item: DifyTreeItem): Promise<void> {
+        if (item.nodeData.type !== 'knowledge') { return; }
+        
+        const configManager = this.getConfigManager();
+        if (!configManager) { return; }
+
+        const data = item.nodeData as KnowledgeNodeData;
+
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: `Pulling documents from ${data.name}...`,
+            cancellable: false,
+        }, async (progress) => {
+            // Path: knowledge/{dataset} -> knowledge -> workspace -> account
+            const knowledgeFolderPath = path.dirname(data.path);
+            const workspacePath = path.dirname(knowledgeFolderPath);
+            const accountPath = path.dirname(workspacePath);
+            
+            const password = await configManager.getAccountPassword(accountPath);
+            if (!password) {
+                throw new Error('Account password not found');
+            }
+
+            const client = getApiClient(data.platformUrl);
+            const success = await client.login(data.accountEmail, password);
+            if (!success) {
+                throw new Error('Login failed');
+            }
+
+            // Get documents list
+            progress.report({ message: 'Fetching documents list...' });
+            const documents = await client.getDatasetDocuments(data.id);
+            console.log(`[PullKnowledge] Found ${documents.length} documents`);
+
+            // Fetch each document's segments
+            const documentsWithContent: Array<{
+                id: string;
+                name: string;
+                content: string;
+                segments: Array<{ id: string; position: number; content: string; answer?: string; keywords?: string[] }>;
+            }> = [];
+
+            for (let i = 0; i < documents.length; i++) {
+                const doc = documents[i];
+                progress.report({ 
+                    message: `Fetching document ${i + 1}/${documents.length}: ${doc.name}`,
+                    increment: (80 / documents.length),
+                });
+
+                try {
+                    const segments = await client.getDocumentSegments(data.id, doc.id);
+                    documentsWithContent.push({
+                        id: doc.id,
+                        name: doc.name,
+                        content: segments.map(s => s.content).join('\n\n'),
+                        segments: segments.map(s => ({
+                            id: s.id,
+                            position: s.position,
+                            content: s.content,
+                            answer: s.answer,
+                            keywords: s.keywords,
+                        })),
+                    });
+                } catch (error) {
+                    console.error(`Failed to fetch segments for ${doc.name}:`, error);
+                    // Still add the document but without segments
+                    documentsWithContent.push({
+                        id: doc.id,
+                        name: doc.name,
+                        content: '',
+                        segments: [],
+                    });
+                }
+            }
+
+            // Save documents locally
+            progress.report({ message: 'Saving documents...', increment: 10 });
+            await configManager.saveKnowledgeDocuments(
+                workspacePath,
+                data.id,
+                data.name,
+                documentsWithContent
+            );
+        });
+
+        this.treeDataProvider.refresh();
+        showTimedNotification(`✓ Knowledge base pulled: ${data.name}`);
+    }
+
+    /**
+     * Push knowledge base documents
+     * - Updates existing remote documents with local content
+     * - Creates new documents for local-only files
+     */
+    async pushKnowledge(item: DifyTreeItem): Promise<void> {
+        if (item.nodeData.type !== 'knowledge') { return; }
+        
+        const configManager = this.getConfigManager();
+        if (!configManager) { return; }
+
+        const data = item.nodeData as KnowledgeNodeData;
+
+        // Check if the knowledge base has been synced
+        if (data.syncStatus !== 'synced') {
+            vscode.window.showWarningMessage('Please pull the knowledge base first before pushing.');
+            return;
+        }
+
+        const confirm = await vscode.window.showWarningMessage(
+            `This will update "${data.name}" on the server. Dify will re-process and re-embed the documents. Continue?`,
+            'Push',
+            'Cancel'
+        );
+
+        if (confirm !== 'Push') { return; }
+
+        let updatedCount = 0;
+        let createdCount = 0;
+
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: `Pushing documents to ${data.name}...`,
+            cancellable: false,
+        }, async (progress) => {
+            // Path: knowledge/{dataset} -> knowledge -> workspace -> account
+            const knowledgeFolderPath = path.dirname(data.path);
+            const workspacePath = path.dirname(knowledgeFolderPath);
+            const accountPath = path.dirname(workspacePath);
+            
+            const password = await configManager.getAccountPassword(accountPath);
+            if (!password) {
+                throw new Error('Account password not found');
+            }
+
+            const client = getApiClient(data.platformUrl);
+            const success = await client.login(data.accountEmail, password);
+            if (!success) {
+                throw new Error('Login failed');
+            }
+
+            // Read local documents
+            progress.report({ message: 'Reading local documents...' });
+            const localData = await configManager.readKnowledgeDocuments(workspacePath, data.name);
+            
+            if (!localData.syncMetadata) {
+                throw new Error('Sync metadata not found');
+            }
+
+            // Get remote documents for comparison
+            progress.report({ message: 'Comparing with remote...' });
+            const remoteDocuments = await client.getDatasetDocuments(data.id);
+            const remoteDocMap = new Map(remoteDocuments.map(d => [d.id, d]));
+
+            // Process each local document
+            for (let i = 0; i < localData.documents.length; i++) {
+                const localDoc = localData.documents[i];
+                const isLocalOnly = localDoc.is_local || localDoc.id.startsWith('local-');
+
+                progress.report({ 
+                    message: `${isLocalOnly ? 'Creating' : 'Updating'} document ${i + 1}/${localData.documents.length}: ${localDoc.name}`,
+                    increment: (80 / localData.documents.length),
+                });
+
+                if (isLocalOnly) {
+                    // Local-only document: create new on remote
+                    try {
+                        await client.createDocumentByText(
+                            data.id,
+                            localDoc.name,
+                            localDoc.content
+                        );
+                        console.log(`[PushKnowledge] Created new document: ${localDoc.name}`);
+                        createdCount++;
+                    } catch (error) {
+                        console.error(`Failed to create document ${localDoc.name}:`, error);
+                        vscode.window.showWarningMessage(`Failed to create: ${localDoc.name}`);
+                    }
+                } else {
+                    // Existing remote document: update
+                    const remoteDoc = remoteDocMap.get(localDoc.id);
+                    
+                    if (remoteDoc) {
+                        try {
+                            await client.updateDocumentByText(
+                                data.id,
+                                localDoc.id,
+                                localDoc.name,
+                                localDoc.content
+                            );
+                            console.log(`[PushKnowledge] Updated document: ${localDoc.name}`);
+                            updatedCount++;
+                        } catch (error) {
+                            console.error(`Failed to update document ${localDoc.name}:`, error);
+                            vscode.window.showWarningMessage(`Failed to update: ${localDoc.name}`);
+                        }
+                    } else {
+                        // Document not found on remote - create it as new
+                        console.log(`[PushKnowledge] Document not found on remote, creating: ${localDoc.name}`);
+                        try {
+                            await client.createDocumentByText(
+                                data.id,
+                                localDoc.name,
+                                localDoc.content
+                            );
+                            console.log(`[PushKnowledge] Created new document: ${localDoc.name}`);
+                            createdCount++;
+                        } catch (error) {
+                            console.error(`Failed to create document ${localDoc.name}:`, error);
+                            vscode.window.showWarningMessage(`Failed to create: ${localDoc.name}`);
+                        }
+                    }
+                }
+            }
+
+            progress.report({ message: 'Done!', increment: 20 });
+        });
+
+        this.treeDataProvider.refresh();
+        
+        const message = createdCount > 0 
+            ? `✓ Pushed: ${updatedCount} updated, ${createdCount} created (Dify will re-embed)`
+            : `✓ Pushed: ${updatedCount} documents updated (Dify will re-embed)`;
+        showTimedNotification(message);
+    }
+
+    /**
+     * Create a new document in a knowledge base
+     */
+    async createKnowledgeDocument(item: DifyTreeItem): Promise<void> {
+        if (item.nodeData.type !== 'knowledge') { return; }
+        
+        const configManager = this.getConfigManager();
+        if (!configManager) { return; }
+
+        const data = item.nodeData as KnowledgeNodeData;
+
+        // Check if the knowledge base has been synced
+        if (data.syncStatus !== 'synced') {
+            vscode.window.showWarningMessage('Please pull the knowledge base first before creating documents.');
+            return;
+        }
+
+        // Ask for document name
+        const documentName = await vscode.window.showInputBox({
+            prompt: 'Enter document name (with extension, e.g., guide.txt)',
+            placeHolder: 'my-document.txt',
+            validateInput: (value) => {
+                if (!value.trim()) { return 'Please enter a document name'; }
+                if (!/\.\w+$/.test(value)) { return 'Please include a file extension (e.g., .txt, .md)'; }
+                return null;
+            },
+        });
+
+        if (!documentName) { return; }
+
+        try {
+            // Path: knowledge/{dataset} -> knowledge -> workspace
+            const knowledgeFolderPath = path.dirname(data.path);
+            const workspacePath = path.dirname(knowledgeFolderPath);
+
+            const docPath = await configManager.createLocalDocument(
+                workspacePath,
+                data.name,
+                documentName,
+                `# ${documentName}\n\nWrite your content here...\n`
+            );
+
+            // Open the new document
+            const doc = await vscode.workspace.openTextDocument(docPath);
+            await vscode.window.showTextDocument(doc);
+
+            this.treeDataProvider.refresh();
+            showTimedNotification(`✓ Created: ${documentName} (Push to upload to Dify)`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to create document: ${error}`);
+        }
+    }
+
+    /**
+     * Unlink knowledge base (stop syncing documents)
+     */
+    async unlinkKnowledge(item: DifyTreeItem): Promise<void> {
+        if (item.nodeData.type !== 'knowledge') { return; }
+        
+        const configManager = this.getConfigManager();
+        if (!configManager) { return; }
+
+        const data = item.nodeData as KnowledgeNodeData;
+
+        if (data.syncStatus !== 'synced') {
+            vscode.window.showInformationMessage('This knowledge base has not been synced yet.');
+            return;
+        }
+
+        const confirm = await vscode.window.showWarningMessage(
+            `Stop syncing "${data.name}"? This will delete local documents but won't affect the server.`,
+            'Unlink',
+            'Cancel'
+        );
+
+        if (confirm !== 'Unlink') { return; }
+
+        try {
+            // Delete the local knowledge base directory
+            const fs = await import('fs');
+            await fs.promises.rm(data.path, { recursive: true, force: true });
+            
+            this.treeDataProvider.refresh();
+            showTimedNotification(`✓ Unlinked: ${data.name}`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to unlink: ${error}`);
+        }
     }
 
     // ==================== Global Commands ====================

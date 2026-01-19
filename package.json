@@ -143,6 +143,36 @@
         "title": "Refresh",
         "category": "Dify",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "dify.pullKnowledge",
+        "title": "Pull Documents",
+        "category": "Dify",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "dify.pushKnowledge",
+        "title": "Push Documents",
+        "category": "Dify",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "dify.unlinkKnowledge",
+        "title": "Unlink (Stop Syncing)",
+        "category": "Dify",
+        "icon": "$(unlink)"
+      },
+      {
+        "command": "dify.createKnowledgeDocument",
+        "title": "New Document",
+        "category": "Dify",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "dify.createApp",
+        "title": "New App",
+        "category": "Dify",
+        "icon": "$(add)"
       }
     ],
     "menus": {
@@ -205,6 +235,11 @@
           "group": "1_sync@1"
         },
         {
+          "command": "dify.createApp",
+          "when": "view == difyAsCode && viewItem == resource-folder-studio",
+          "group": "1_create@1"
+        },
+        {
           "command": "dify.openAppConfig",
           "when": "view == difyAsCode && viewItem =~ /^app/",
           "group": "1_open@1"
@@ -233,6 +268,31 @@
           "command": "dify.viewSyncStatus",
           "when": "view == difyAsCode && viewItem =~ /^app/",
           "group": "3_copy@2"
+        },
+        {
+          "command": "dify.pullKnowledge",
+          "when": "view == difyAsCode && viewItem == knowledge",
+          "group": "1_sync@1"
+        },
+        {
+          "command": "dify.pullKnowledge",
+          "when": "view == difyAsCode && viewItem == knowledge-synced",
+          "group": "1_sync@1"
+        },
+        {
+          "command": "dify.pushKnowledge",
+          "when": "view == difyAsCode && viewItem == knowledge-synced",
+          "group": "1_sync@2"
+        },
+        {
+          "command": "dify.unlinkKnowledge",
+          "when": "view == difyAsCode && viewItem == knowledge-synced",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "dify.createKnowledgeDocument",
+          "when": "view == difyAsCode && viewItem == knowledge-synced",
+          "group": "0_create@1"
         }
       ],
       "commandPalette": [
@@ -283,6 +343,21 @@
         },
         {
           "command": "dify.pullAll"
+        },
+        {
+          "command": "dify.pullKnowledge"
+        },
+        {
+          "command": "dify.pushKnowledge"
+        },
+        {
+          "command": "dify.unlinkKnowledge"
+        },
+        {
+          "command": "dify.createKnowledgeDocument"
+        },
+        {
+          "command": "dify.createApp"
         }
       ]
     }
@@ -312,6 +387,7 @@
   },
   "dependencies": {
     "axios": "^1.6.2",
+    "form-data": "^4.0.5",
     "js-yaml": "^4.1.0"
   }
 }

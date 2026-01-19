@@ -3,7 +3,8 @@
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
-import { DifyApp, DifyAppListResponse, DifyWorkspace, APP_MODE_TO_TYPE, AppType, UserRole } from './types';
+import FormData from 'form-data';
+import { DifyApp, DifyAppListResponse, DifyWorkspace, APP_MODE_TO_TYPE, AppType, UserRole, ModelTypeCategory, ModelProviderSummary, ModelSummary, ModelsRegistry, KnowledgeRegistry, KnowledgeSummary, ToolsRegistry, ToolSummary, ToolParameter, PluginsRegistry, PluginSummary, DocumentSummary, DocumentSegment } from './types';
 
 /**
  * Encode sensitive field using Base64
@@ -427,6 +428,42 @@ export class DifyApiClient {
     }
 
     /**
+     * Create a new app
+     * Only workflow and chatflow (advanced-chat) types support DSL import/export
+     */
+    async createApp(
+        name: string,
+        mode: 'workflow' | 'advanced-chat',
+        icon_type: 'emoji' | 'image' = 'emoji',
+        icon: string = '🤖',
+        icon_background: string = '#FFEAD5',
+        description: string = ''
+    ): Promise<{ id: string; name: string; mode: string }> {
+        try {
+            console.log(`[DifyAPI] Creating new app: ${name} (${mode})...`);
+            
+            const response = await this.client.post('/console/api/apps', {
+                name,
+                mode,
+                icon_type,
+                icon,
+                icon_background,
+                description,
+            });
+            
+            console.log(`[DifyAPI] App created: ${response.data.id}`);
+            return {
+                id: response.data.id,
+                name: response.data.name,
+                mode: response.data.mode,
+            };
+        } catch (error) {
+            console.error('[DifyAPI] Failed to create app:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Export app DSL
      */
     async exportApp(appId: string): Promise<{ dsl: string; updatedAt: string }> {
@@ -583,6 +620,795 @@ export class DifyApiClient {
         this.accessToken = null;
         this.refreshToken = null;
         this.csrfToken = null;
+    }
+
+    /**
+     * Get model providers list
+     * Returns all configured model providers in the current workspace
+     */
+    async getModelProviders(): Promise<ModelProviderSummary[]> {
+        try {
+            console.log('[DifyAPI] Getting model providers...');
+            const response = await this.client.get('/console/api/workspaces/current/model-providers');
+            
+            const providers = response.data.data || response.data || [];
+            console.log(`[DifyAPI] Found ${providers.length} model providers`);
+            
+            const result: ModelProviderSummary[] = [];
+            
+            for (const provider of providers) {
+                // Determine provider status
+                const hasCredential = provider.system_configuration?.current_credentials?.length > 0 ||
+                                     provider.custom_configuration?.provider?.credentials;
+                
+                result.push({
+                    provider: provider.provider,
+                    label: provider.label?.en_US || provider.label?.zh_Hans || provider.provider,
+                    icon: provider.icon_small?.en_US || provider.icon_small?.zh_Hans,
+                    status: hasCredential ? 'active' : 'no-configure',
+                    models: [], // Will be populated by getModelsForType
+                });
+            }
+            
+            return result;
+        } catch (error) {
+            console.error('[DifyAPI] Failed to get model providers:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get models for a specific model type
+     * @param modelType - Type of models to fetch (llm, text-embedding, rerank, etc.)
+     */
+    async getModelsForType(modelType: ModelTypeCategory): Promise<ModelSummary[]> {
+        try {
+            console.log(`[DifyAPI] Getting ${modelType} models...`);
+            const response = await this.client.get(`/console/api/workspaces/current/models/model-types/${modelType}`);
+            
+            const modelsData = response.data.data || response.data || [];
+            console.log(`[DifyAPI] Found ${modelsData.length} ${modelType} model entries`);
+            
+            const models: ModelSummary[] = [];
+            
+            for (const providerEntry of modelsData) {
+                const providerName = providerEntry.provider;
+                const providerModels = providerEntry.models || [];
+                
+                for (const model of providerModels) {
+                    models.push({
+                        model: model.model,
+                        label: model.label?.en_US || model.label?.zh_Hans || model.model,
+                        model_type: modelType,
+                        provider: providerName,
+                        features: model.features || [],
+                        context_size: model.model_properties?.context_size,
+                        mode: model.model_properties?.mode,
+                        deprecated: model.deprecated,
+                        status: model.status,
+                        pricing: model.pricing,
+                    });
+                }
+            }
+            
+            return models;
+        } catch (error) {
+            console.error(`[DifyAPI] Failed to get ${modelType} models:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get all models from the workspace
+     * Returns a complete ModelsRegistry with all providers and their models
+     */
+    async getAllModels(): Promise<ModelsRegistry> {
+        console.log('[DifyAPI] Getting all models...');
+        
+        // Get all model providers first
+        const providers = await this.getModelProviders();
+        
+        // Get models for each type
+        const modelTypes: ModelTypeCategory[] = ['llm', 'text-embedding', 'rerank', 'speech2text', 'tts'];
+        const allModels: ModelSummary[] = [];
+        
+        for (const modelType of modelTypes) {
+            try {
+                const models = await this.getModelsForType(modelType);
+                allModels.push(...models);
+            } catch (error) {
+                console.warn(`[DifyAPI] Failed to get ${modelType} models, skipping...`);
+            }
+        }
+        
+        // Group models by provider
+        const modelsByProvider = new Map<string, ModelSummary[]>();
+        for (const model of allModels) {
+            const existing = modelsByProvider.get(model.provider) || [];
+            existing.push(model);
+            modelsByProvider.set(model.provider, existing);
+        }
+        
+        // Merge models into providers
+        for (const provider of providers) {
+            provider.models = modelsByProvider.get(provider.provider) || [];
+        }
+        
+        // Filter out providers with no configured models
+        const activeProviders = providers.filter(p => p.models.length > 0 || p.status === 'active');
+        
+        // Try to get default model settings
+        let defaultModels: ModelsRegistry['default_models'] = {};
+        try {
+            const defaultModelResponse = await this.client.get('/console/api/workspaces/current/default-model');
+            const defaultModelData = defaultModelResponse.data;
+            if (defaultModelData) {
+                defaultModels = {
+                    llm: defaultModelData.model?.model,
+                    text_embedding: defaultModelData.text_embedding_model?.model,
+                    rerank: defaultModelData.rerank_model?.model,
+                    speech2text: defaultModelData.speech2text_model?.model,
+                    tts: defaultModelData.tts_model?.model,
+                };
+            }
+        } catch {
+            console.log('[DifyAPI] Could not get default models, continuing...');
+        }
+        
+        const registry: ModelsRegistry = {
+            last_synced_at: new Date().toISOString(),
+            default_models: defaultModels,
+            providers: activeProviders,
+        };
+        
+        console.log(`[DifyAPI] Models registry complete: ${activeProviders.length} providers, ${allModels.length} models`);
+        return registry;
+    }
+
+    // ==================== Knowledge (Datasets) API ====================
+
+    /**
+     * Get all knowledge bases (datasets)
+     */
+    async getAllKnowledge(): Promise<KnowledgeRegistry> {
+        console.log('[DifyAPI] Getting all knowledge bases...');
+        
+        const allDatasets: KnowledgeSummary[] = [];
+        let page = 1;
+        const limit = 100;
+        let hasMore = true;
+
+        while (hasMore) {
+            try {
+                const response = await this.client.get('/console/api/datasets', {
+                    params: { page, limit },
+                });
+
+                const data = response.data.data || response.data || [];
+                
+                for (const dataset of data) {
+                    allDatasets.push({
+                        id: dataset.id,
+                        name: dataset.name,
+                        description: dataset.description,
+                        provider: dataset.provider || 'vendor',
+                        permission: dataset.permission || 'only_me',
+                        data_source_type: dataset.data_source_type,
+                        indexing_technique: dataset.indexing_technique,
+                        app_count: dataset.app_count || 0,
+                        document_count: dataset.document_count || 0,
+                        word_count: dataset.word_count || 0,
+                        created_at: dataset.created_at,
+                        updated_at: dataset.updated_at,
+                    });
+                }
+
+                hasMore = response.data.has_more || false;
+                page++;
+            } catch (error) {
+                console.error('[DifyAPI] Failed to get knowledge bases page:', page, error);
+                break;
+            }
+        }
+
+        const registry: KnowledgeRegistry = {
+            last_synced_at: new Date().toISOString(),
+            datasets: allDatasets,
+        };
+
+        console.log(`[DifyAPI] Knowledge registry complete: ${allDatasets.length} datasets`);
+        return registry;
+    }
+
+    // ==================== Tools API ====================
+
+    /**
+     * Get all tool providers with their detailed tools
+     */
+    async getAllTools(): Promise<ToolsRegistry> {
+        console.log('[DifyAPI] Getting all tools...');
+        
+        try {
+            const response = await this.client.get('/console/api/workspaces/current/tool-providers');
+            const providers = response.data || [];
+            
+            const toolProviders: ToolSummary[] = [];
+            
+            for (const provider of providers) {
+                let tools = provider.tools || [];
+                
+                // If tools array is empty or missing parameters, try to fetch detailed tools
+                if (tools.length === 0 || (tools.length > 0 && !tools[0].parameters)) {
+                    const detailedTools = await this.getToolProviderTools(provider.name, provider.type || 'builtin');
+                    if (detailedTools.length > 0) {
+                        tools = detailedTools;
+                    }
+                }
+                
+                toolProviders.push({
+                    name: provider.name,
+                    author: provider.author || 'dify',
+                    label: provider.label?.en_US || provider.label?.zh_Hans || provider.name,
+                    description: provider.description?.en_US || provider.description?.zh_Hans,
+                    icon: provider.icon,
+                    type: provider.type || 'builtin',
+                    team_credentials: provider.team_credentials,
+                    is_team_authorization: provider.is_team_authorization || false,
+                    tools: tools.map((tool: { 
+                        name: string; 
+                        author?: string; 
+                        label?: { en_US?: string; zh_Hans?: string } | string; 
+                        description?: { en_US?: string; zh_Hans?: string } | string; 
+                        parameters?: unknown[];
+                        human_description?: { en_US?: string; zh_Hans?: string } | string;
+                    }) => ({
+                        name: tool.name,
+                        author: tool.author || provider.author || 'dify',
+                        label: typeof tool.label === 'string' ? tool.label : (tool.label?.en_US || tool.label?.zh_Hans || tool.name),
+                        description: typeof tool.description === 'string' ? tool.description : 
+                            (tool.description?.en_US || tool.description?.zh_Hans || 
+                             (typeof tool.human_description === 'string' ? tool.human_description : 
+                              (tool.human_description?.en_US || tool.human_description?.zh_Hans))),
+                        parameters: this.normalizeToolParameters(tool.parameters),
+                    })),
+                });
+            }
+
+            const registry: ToolsRegistry = {
+                last_synced_at: new Date().toISOString(),
+                providers: toolProviders,
+            };
+
+            console.log(`[DifyAPI] Tools registry complete: ${toolProviders.length} providers`);
+            return registry;
+        } catch (error) {
+            console.error('[DifyAPI] Failed to get tools:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get detailed tools for a specific tool provider
+     */
+    private async getToolProviderTools(providerName: string, providerType: string): Promise<unknown[]> {
+        // Try multiple API paths
+        const pathVariations = [
+            `/console/api/workspaces/current/tool-provider/${providerType}/${providerName}/tools`,
+            `/console/api/workspaces/current/tool-provider/builtin/${providerName}/tools`,
+            `/console/api/workspaces/current/tool-providers/${providerName}/tools`,
+        ];
+        
+        for (const apiPath of pathVariations) {
+            try {
+                const response = await this.client.get(apiPath);
+                if (response.data && Array.isArray(response.data)) {
+                    console.log(`[DifyAPI] Got ${response.data.length} tools for provider ${providerName}`);
+                    return response.data;
+                }
+            } catch {
+                // Try next path
+            }
+        }
+        
+        return [];
+    }
+
+    /**
+     * Normalize tool parameters to a consistent format
+     */
+    private normalizeToolParameters(parameters: unknown[] | undefined): ToolParameter[] {
+        if (!parameters || !Array.isArray(parameters)) {
+            return [];
+        }
+        
+        return parameters.map((param: unknown) => {
+            const p = param as {
+                name?: string;
+                label?: { en_US?: string; zh_Hans?: string } | string;
+                human_description?: { en_US?: string; zh_Hans?: string } | string;
+                type?: string;
+                form?: string;
+                required?: boolean;
+                default?: unknown;
+                options?: Array<{ label?: { en_US?: string; zh_Hans?: string } | string; value: string }>;
+            };
+            
+            return {
+                name: p.name || '',
+                label: typeof p.label === 'string' ? p.label : (p.label?.en_US || p.label?.zh_Hans || p.name || ''),
+                description: typeof p.human_description === 'string' ? p.human_description : 
+                    (p.human_description?.en_US || p.human_description?.zh_Hans),
+                type: p.type || p.form || 'string',
+                required: p.required || false,
+                default: p.default,
+                options: p.options?.map((opt) => ({
+                    label: typeof opt.label === 'string' ? opt.label : (opt.label?.en_US || opt.label?.zh_Hans || opt.value),
+                    value: opt.value,
+                })),
+            };
+        });
+    }
+
+    // ==================== Plugins API ====================
+
+    /**
+     * Get all installed plugins
+     */
+    async getAllPlugins(): Promise<PluginsRegistry> {
+        console.log('[DifyAPI] Getting all plugins...');
+        
+        try {
+            const response = await this.client.get('/console/api/workspaces/current/plugin/list', {
+                params: { page: 1, page_size: 100 },
+            });
+            
+            const pluginsData = response.data.plugins || response.data || [];
+            
+            const plugins: PluginSummary[] = [];
+            
+            for (const plugin of pluginsData) {
+                plugins.push({
+                    plugin_id: plugin.plugin_id,
+                    plugin_unique_identifier: plugin.plugin_unique_identifier,
+                    name: plugin.name || plugin.plugin_id,
+                    label: plugin.declaration?.label?.en_US || plugin.declaration?.label?.zh_Hans || plugin.name,
+                    description: plugin.declaration?.description?.en_US || plugin.declaration?.description?.zh_Hans,
+                    icon: plugin.declaration?.icon,
+                    version: plugin.version,
+                    author: plugin.declaration?.author || 'unknown',
+                    category: plugin.declaration?.category || 'tool',
+                    type: plugin.source || 'marketplace',
+                    source: plugin.source,
+                    latest_version: plugin.latest_version,
+                    latest_unique_identifier: plugin.latest_unique_identifier,
+                    installation_id: plugin.installation_id,
+                    endpoints_active: plugin.endpoints_active || false,
+                    declaration: {
+                        plugins: plugin.declaration?.plugins,
+                        model: plugin.declaration?.model,
+                        tool: plugin.declaration?.tool,
+                        endpoint: plugin.declaration?.endpoint,
+                        agent_strategy: plugin.declaration?.agent_strategy,
+                    },
+                    created_at: plugin.created_at,
+                });
+            }
+
+            const registry: PluginsRegistry = {
+                last_synced_at: new Date().toISOString(),
+                plugins: plugins,
+            };
+
+            console.log(`[DifyAPI] Plugins registry complete: ${plugins.length} plugins`);
+            return registry;
+        } catch (error) {
+            console.error('[DifyAPI] Failed to get plugins:', error);
+            throw error;
+        }
+    }
+
+    // ==================== Knowledge Documents API ====================
+
+    /**
+     * Get documents list from a specific knowledge base
+     */
+    async getDatasetDocuments(datasetId: string): Promise<DocumentSummary[]> {
+        console.log(`[DifyAPI] Getting documents for dataset ${datasetId}...`);
+        
+        const allDocuments: DocumentSummary[] = [];
+        let page = 1;
+        const limit = 100;
+        let hasMore = true;
+
+        while (hasMore) {
+            try {
+                const response = await this.client.get(`/console/api/datasets/${datasetId}/documents`, {
+                    params: { page, limit },
+                });
+
+                const data = response.data.data || response.data || [];
+                
+                for (const doc of data) {
+                    allDocuments.push({
+                        id: doc.id,
+                        name: doc.name,
+                        data_source_type: doc.data_source_type,
+                        word_count: doc.word_count || 0,
+                        tokens: doc.tokens || 0,
+                        indexing_status: doc.indexing_status,
+                        enabled: doc.enabled,
+                        archived: doc.archived || false,
+                        display_status: doc.display_status,
+                        created_at: doc.created_at,
+                        updated_at: doc.updated_at,
+                        doc_form: doc.doc_form,
+                    });
+                }
+
+                hasMore = response.data.has_more || false;
+                page++;
+            } catch (error) {
+                console.error(`[DifyAPI] Failed to get documents page ${page}:`, error);
+                break;
+            }
+        }
+
+        console.log(`[DifyAPI] Found ${allDocuments.length} documents`);
+        return allDocuments;
+    }
+
+    /**
+     * Get document segments (chunks) from a specific document
+     */
+    async getDocumentSegments(datasetId: string, documentId: string): Promise<DocumentSegment[]> {
+        console.log(`[DifyAPI] Getting segments for document ${documentId}...`);
+        
+        const allSegments: DocumentSegment[] = [];
+        let page = 1;
+        const limit = 100;
+        let hasMore = true;
+
+        while (hasMore) {
+            try {
+                const response = await this.client.get(`/console/api/datasets/${datasetId}/documents/${documentId}/segments`, {
+                    params: { page, limit },
+                });
+
+                const data = response.data.data || response.data || [];
+                
+                for (const seg of data) {
+                    allSegments.push({
+                        id: seg.id,
+                        position: seg.position,
+                        document_id: seg.document_id,
+                        content: seg.content,
+                        word_count: seg.word_count || 0,
+                        tokens: seg.tokens || 0,
+                        keywords: seg.keywords || [],
+                        index_node_id: seg.index_node_id,
+                        index_node_hash: seg.index_node_hash,
+                        hit_count: seg.hit_count || 0,
+                        enabled: seg.enabled,
+                        disabled_at: seg.disabled_at,
+                        disabled_by: seg.disabled_by,
+                        status: seg.status,
+                        created_at: seg.created_at,
+                        updated_at: seg.updated_at,
+                        indexing_at: seg.indexing_at,
+                        completed_at: seg.completed_at,
+                        error: seg.error,
+                        stopped_at: seg.stopped_at,
+                        answer: seg.answer,
+                    });
+                }
+
+                hasMore = response.data.has_more || false;
+                page++;
+            } catch (error) {
+                console.error(`[DifyAPI] Failed to get segments page ${page}:`, error);
+                break;
+            }
+        }
+
+        console.log(`[DifyAPI] Found ${allSegments.length} segments`);
+        return allSegments;
+    }
+
+    /**
+     * Get knowledge base details
+     */
+    async getDatasetDetail(datasetId: string): Promise<KnowledgeSummary & { embedding_model?: string; embedding_model_provider?: string }> {
+        console.log(`[DifyAPI] Getting dataset detail for ${datasetId}...`);
+        
+        try {
+            const response = await this.client.get(`/console/api/datasets/${datasetId}`);
+            const dataset = response.data;
+            
+            return {
+                id: dataset.id,
+                name: dataset.name,
+                description: dataset.description,
+                provider: dataset.provider || 'vendor',
+                permission: dataset.permission || 'only_me',
+                data_source_type: dataset.data_source_type,
+                indexing_technique: dataset.indexing_technique,
+                app_count: dataset.app_count || 0,
+                document_count: dataset.document_count || 0,
+                word_count: dataset.word_count || 0,
+                created_at: dataset.created_at,
+                updated_at: dataset.updated_at,
+                embedding_model: dataset.embedding_model,
+                embedding_model_provider: dataset.embedding_model_provider,
+            };
+        } catch (error) {
+            console.error(`[DifyAPI] Failed to get dataset detail:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Create a new document in knowledge base by uploading text content
+     * Uses multipart/form-data file upload to match Dify Console's behavior
+     */
+    async createDocumentByText(
+        datasetId: string,
+        name: string,
+        text: string,
+        indexingTechnique: 'high_quality' | 'economy' = 'high_quality',
+        processRule?: {
+            mode: 'automatic' | 'custom';
+            rules?: {
+                pre_processing_rules?: Array<{ id: string; enabled: boolean }>;
+                segmentation?: { separator: string; max_tokens: number; chunk_overlap: number };
+            };
+        }
+    ): Promise<{ document_id: string; batch: string }> {
+        console.log(`[DifyAPI] Creating document "${name}" in dataset ${datasetId}...`);
+        
+        // Create a virtual file from text content
+        const fileContent = Buffer.from(text, 'utf-8');
+        const fileName = name.endsWith('.txt') ? name : `${name}.txt`;
+        
+        // Build FormData for file upload
+        const formData = new FormData();
+        formData.append('file', fileContent, {
+            filename: fileName,
+            contentType: 'text/plain; charset=utf-8',
+        });
+        
+        // Document processing settings
+        const documentData = {
+            indexing_technique: indexingTechnique,
+            process_rule: processRule || {
+                mode: 'automatic',
+            },
+            doc_form: 'text_model',
+            doc_language: 'Chinese',
+        };
+        formData.append('data', JSON.stringify(documentData));
+        
+        // Try multiple API path variations for file upload
+        const pathVariations = [
+            `/console/api/datasets/${datasetId}/document/create-by-file`,
+            `/console/api/datasets/${datasetId}/document/create_by_file`,
+            `/console/api/datasets/${datasetId}/documents/create-by-file`,
+            `/console/api/datasets/${datasetId}/documents/create_by_file`,
+        ];
+        
+        for (const apiPath of pathVariations) {
+            try {
+                console.log(`[DifyAPI] Trying file upload: POST ${apiPath}`);
+                
+                // Create a new FormData for each attempt
+                const fd = new FormData();
+                fd.append('file', fileContent, {
+                    filename: fileName,
+                    contentType: 'text/plain; charset=utf-8',
+                });
+                fd.append('data', JSON.stringify(documentData));
+                
+                const response = await this.client.post(apiPath, fd, {
+                    headers: {
+                        ...fd.getHeaders(),
+                    },
+                });
+                
+                console.log(`[DifyAPI] Document created via file upload: ${response.data.document?.id || response.data.id}`);
+                return {
+                    document_id: response.data.document?.id || response.data.id,
+                    batch: response.data.batch,
+                };
+            } catch (error: unknown) {
+                const axiosError = error as { response?: { status?: number; data?: unknown } };
+                if (axiosError.response?.status === 404) {
+                    console.log(`[DifyAPI] Path not found: ${apiPath}, trying next...`);
+                    continue;
+                }
+                // Log error details and continue
+                console.error(`[DifyAPI] Failed with ${apiPath}:`, axiosError.response?.data || error);
+            }
+        }
+        
+        // Fallback: try JSON-based create-by-text endpoints
+        console.log('[DifyAPI] File upload methods failed, trying JSON-based endpoints...');
+        const jsonRequestBody = {
+            name,
+            text,
+            indexing_technique: indexingTechnique,
+            process_rule: processRule || {
+                mode: 'automatic',
+            },
+        };
+        
+        const jsonPathVariations = [
+            `/console/api/datasets/${datasetId}/document/create-by-text`,
+            `/console/api/datasets/${datasetId}/document/create_by_text`,
+        ];
+        
+        for (const apiPath of jsonPathVariations) {
+            try {
+                console.log(`[DifyAPI] Trying JSON: POST ${apiPath}`);
+                const response = await this.client.post(apiPath, jsonRequestBody);
+                
+                console.log(`[DifyAPI] Document created: ${response.data.document?.id || response.data.id}`);
+                return {
+                    document_id: response.data.document?.id || response.data.id,
+                    batch: response.data.batch,
+                };
+            } catch (error: unknown) {
+                const axiosError = error as { response?: { status?: number } };
+                if (axiosError.response?.status === 404) {
+                    console.log(`[DifyAPI] Path not found: ${apiPath}, trying next...`);
+                    continue;
+                }
+                console.error('[DifyAPI] Failed to create document:', error);
+            }
+        }
+        
+        throw new Error('Failed to create document: No valid API endpoint found. Please check Dify version compatibility.');
+    }
+
+    /**
+     * Update an existing document with new text content
+     * Uses segment replacement: delete all segments and add new one with full content
+     */
+    async updateDocumentByText(
+        datasetId: string,
+        documentId: string,
+        name: string,
+        text: string,
+        _processRule?: {
+            mode: 'automatic' | 'custom';
+            rules?: {
+                pre_processing_rules?: Array<{ id: string; enabled: boolean }>;
+                segmentation?: { separator: string; max_tokens: number; chunk_overlap: number };
+            };
+        }
+    ): Promise<{ document_id: string; batch: string }> {
+        console.log(`[DifyAPI] Updating document ${documentId} in dataset ${datasetId}...`);
+        
+        // Strategy: Replace all segments with new content
+        // This is safer than delete-and-recreate approach
+        
+        try {
+            // Step 1: Get existing segments
+            console.log('[DifyAPI] Getting existing segments...');
+            const existingSegments = await this.getDocumentSegments(datasetId, documentId);
+            console.log(`[DifyAPI] Found ${existingSegments.length} existing segments`);
+            
+            // Step 2: Delete all existing segments
+            for (const segment of existingSegments) {
+                try {
+                    await this.deleteSegment(datasetId, documentId, segment.id);
+                } catch (error) {
+                    console.warn(`[DifyAPI] Failed to delete segment ${segment.id}, continuing...`);
+                }
+            }
+            console.log('[DifyAPI] Deleted existing segments');
+            
+            // Step 3: Add new segment with full content
+            console.log('[DifyAPI] Adding new segment with updated content...');
+            await this.addDocumentSegments(datasetId, documentId, [
+                { content: text }
+            ]);
+            
+            console.log(`[DifyAPI] Document updated via segment replacement: ${documentId}`);
+            return {
+                document_id: documentId,
+                batch: '',
+            };
+        } catch (error) {
+            console.error('[DifyAPI] Failed to update document via segment replacement:', error);
+            throw new Error(`Failed to update document: Dify API does not support direct document update. Error: ${error}`);
+        }
+    }
+
+    /**
+     * Delete a document from knowledge base
+     */
+    async deleteDocument(datasetId: string, documentId: string): Promise<boolean> {
+        console.log(`[DifyAPI] Deleting document ${documentId} from dataset ${datasetId}...`);
+        
+        try {
+            await this.client.delete(`/console/api/datasets/${datasetId}/documents/${documentId}`);
+            console.log(`[DifyAPI] Document deleted: ${documentId}`);
+            return true;
+        } catch (error) {
+            console.error('[DifyAPI] Failed to delete document:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Add segments to a document
+     */
+    async addDocumentSegments(
+        datasetId: string,
+        documentId: string,
+        segments: Array<{ content: string; answer?: string; keywords?: string[] }>
+    ): Promise<{ batch: string; segments: DocumentSegment[] }> {
+        console.log(`[DifyAPI] Adding ${segments.length} segments to document ${documentId}...`);
+        
+        try {
+            const response = await this.client.post(`/console/api/datasets/${datasetId}/documents/${documentId}/segments`, {
+                segments,
+            });
+            
+            console.log(`[DifyAPI] Segments added`);
+            return {
+                batch: response.data.batch,
+                segments: response.data.data || [],
+            };
+        } catch (error) {
+            console.error('[DifyAPI] Failed to add segments:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Update a segment
+     */
+    async updateSegment(
+        datasetId: string,
+        documentId: string,
+        segmentId: string,
+        content: string,
+        answer?: string,
+        keywords?: string[]
+    ): Promise<DocumentSegment> {
+        console.log(`[DifyAPI] Updating segment ${segmentId}...`);
+        
+        try {
+            const response = await this.client.patch(`/console/api/datasets/${datasetId}/documents/${documentId}/segments/${segmentId}`, {
+                segment: {
+                    content,
+                    answer,
+                    keywords,
+                },
+            });
+            
+            console.log(`[DifyAPI] Segment updated`);
+            return response.data.data;
+        } catch (error) {
+            console.error('[DifyAPI] Failed to update segment:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Delete a segment
+     */
+    async deleteSegment(datasetId: string, documentId: string, segmentId: string): Promise<boolean> {
+        console.log(`[DifyAPI] Deleting segment ${segmentId}...`);
+        
+        try {
+            await this.client.delete(`/console/api/datasets/${datasetId}/documents/${documentId}/segments/${segmentId}`);
+            console.log(`[DifyAPI] Segment deleted`);
+            return true;
+        } catch (error) {
+            console.error('[DifyAPI] Failed to delete segment:', error);
+            throw error;
+        }
     }
 }
 
